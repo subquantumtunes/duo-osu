@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Copy, Download, Plug, Unplug } from 'lucide-react'
+import { Check, Copy, Download, ExternalLink, Plug, Unplug } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
 import type { BridgeStatus } from '@/hooks/use-bridge'
@@ -16,7 +16,45 @@ const STATUS_TEXT: Record<BridgeStatus, string> = {
   connecting: 'Connecting…',
   connected: 'Connected',
   'bad-token': 'Wrong pairing code',
-  unreachable: 'Bridge not running',
+  unreachable: "Couldn't reach the bridge",
+}
+
+function UnreachableHelp() {
+  const embedded = window.self !== window.top
+  return (
+    <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs leading-relaxed">
+      {embedded ? (
+        <>
+          <p className="text-foreground">
+            This page is running inside an embedded preview, and browsers block embedded pages from connecting to
+            programs on your computer. Open the host page in its own tab and pair from there.
+          </p>
+          <a
+            href="/host"
+            target="_blank"
+            rel="noopener"
+            className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'w-fit')}
+          >
+            <ExternalLink aria-hidden="true" />
+            Open host page in a new tab
+          </a>
+        </>
+      ) : (
+        <ul className="flex list-disc flex-col gap-1 pl-4 text-muted-foreground">
+          <li>
+            Check the bridge window still says <span className="text-foreground">bridge is running</span> and that you
+            copied the latest pairing code (it changes each time the bridge starts).
+          </li>
+          <li>
+            If Chrome or Edge asked to access devices on your local network and you blocked it, click the icon at the
+            left of the address bar, allow <span className="text-foreground">Local network access</span>, and reload.
+          </li>
+          <li>Safari blocks this connection. Use Chrome, Edge, or Firefox on the host PC.</li>
+          <li>Run the bridge on the same computer as this browser.</li>
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export function BridgePanel({
@@ -127,6 +165,7 @@ export function BridgePanel({
           </span>
         )}
       </div>
+      {status === 'unreachable' && <UnreachableHelp />}
     </Panel>
   )
 }

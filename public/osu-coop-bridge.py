@@ -147,7 +147,9 @@ async def run(args):
     injector = Injector(region)
     active = {"ws": None}
 
-    async def handler(ws):
+    # websockets < 10.1 passes (ws, path); newer versions pass only ws.
+    async def handler(ws, *_):
+        print("Page connecting...")
         try:
             hello = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
         except Exception:
@@ -155,6 +157,7 @@ async def run(args):
             return
 
         if hello.get("t") != "auth" or not secrets.compare_digest(normalize_token(hello.get("token")), token):
+            print("Rejected a page with the wrong pairing code.")
             await asyncio.sleep(1)
             await ws.send(json.dumps({"t": "error", "reason": "bad-token"}))
             await ws.close()
