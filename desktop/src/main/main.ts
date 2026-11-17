@@ -25,6 +25,9 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding')
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('force_high_performance_gpu')
+// Windows Graphics Capture often delivers no frames or black frames for a fullscreen game on
+// another window's monitor. The DXGI desktop duplicator captures what the display shows.
+if (process.platform === 'win32') app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer')
 
 if (!app.requestSingleInstanceLock()) app.quit()
 

@@ -25,6 +25,10 @@ export type EncoderStats = {
   name: string | null
   hardware: boolean | null
   limitation: string | null
+  link: RTCPeerConnectionState | 'none'
+  captureFps: number | null
+  framesEncoded: number
+  track: 'live' | 'muted' | 'ended' | 'none'
 }
 
 type Handlers = {
@@ -399,24 +403,42 @@ export class HostSession {
 
   private async readStats() {
     const pc = this.videoCall?.peerConnection
-    if (!pc) return
-    const report = await pc.getStats()
-    report.forEach((s) => {
-      if (s.type !== 'outbound-rtp' || s.kind !== 'video') return
-      const frames: number = s.framesEncoded ?? 0
-      const seconds: number = s.totalEncodeTime ?? 0
-      const df = frames - this.lastEncode.frames
-      const encodeMs = df > 0 ? ((seconds - this.lastEncode.seconds) / df) * 1000 : null
-      this.lastEncode = { frames, seconds }
-      this.encoder = {
-        fps: typeof s.framesPerSecond === 'number' ? s.framesPerSecond : null,
-        height: typeof s.frameHeight === 'number' ? s.frameHeight : null,
-        encodeMs,
-        name: typeof s.encoderImplementation === 'string' ? s.encoderImplementation : null,
-        hardware: typeof s.powerEfficientEncoder === 'boolean' ? s.powerEfficientEncoder : null,
-        limitation: typeof s.qualityLimitationReason === 'string' ? s.qualityLimitationReason : null,
-      }
-    })
+    const track = this.stream?.getVideoTracks()[0]
+    const next: EncoderStats = {
+      fps: null,
+      height: null,
+      encodeMs: null,
+      name: null,
+      hardware: null,
+      limitation: null,
+      link: pc?.connectionState ?? 'none',
+      captureFps: null,
+      framesEncoded: 0,
+      track: !track ? 'none' : track.readyState === 'ended' ? 'ended' : track.muted ? 'muted' : 'live',
+    }
+    if (pc) {
+      const report = await pc.getStats()
+      report.forEach((s) => {
+        if (s.kind !== 'video') return
+        if (s.type === 'media-source') {
+          if (typeof s.framesPerSecond === 'number') next.captureFps = s.framesPerSecond
+          return
+        }
+        if (s.type !== 'outbound-rtp') return
+        const frames: number = s.framesEncoded ?? 0
+        const seconds: number = s.totalEncodeTime ?? 0
+        const df = frames - this.lastEncode.frames
+        next.encodeMs = df > 0 ? ((seconds - this.lastEncode.seconds) / df) * 1000 : null
+        this.lastEncode = { frames, seconds }
+        next.framesEncoded = frames
+        next.fps = typeof s.framesPerSecond === 'number' ? s.framesPerSecond : null
+        next.height = typeof s.frameHeight === 'number' ? s.frameHeight : null
+        next.name = typeof s.encoderImplementation === 'string' ? s.encoderImplementation : null
+        next.hardware = typeof s.powerEfficientEncoder === 'boolean' ? s.powerEfficientEncoder : null
+        next.limitation = typeof s.qualityLimitationReason === 'string' ? s.qualityLimitationReason : null
+      })
+    }
+    this.encoder = next
     this.handlers.onChange()
   }
 }

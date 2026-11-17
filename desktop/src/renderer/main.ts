@@ -169,15 +169,23 @@ function render() {
           : 'Start hosting to get a code for your partner.'
 
   const enc = session.encoder
-  $('stat-encoder').textContent = enc?.name
-    ? `${enc.hardware === true ? 'GPU' : enc.hardware === false ? 'CPU' : ''} ${enc.name}`.trim()
-    : '-'
+  $('stat-encoder').textContent = !enc
+    ? '-'
+    : enc.name
+      ? `${enc.hardware === true ? 'GPU' : enc.hardware === false ? 'CPU' : ''} ${enc.name}`.trim()
+      : enc.track !== 'live'
+        ? `Capture ${enc.track}`
+        : enc.link !== 'connected'
+          ? `Video link ${enc.link}`
+          : 'No frames encoded'
   $('stat-encoder').title = enc?.name ?? ''
   $('stat-encode').textContent = enc?.encodeMs != null ? `${enc.encodeMs.toFixed(1)} ms` : '-'
   $('stat-fps').textContent =
     enc?.fps != null
       ? `${Math.round(enc.fps)} fps${enc.height ? ` · ${enc.height}p` : ''}${enc.limitation && enc.limitation !== 'none' ? ` · ${enc.limitation}` : ''}`
-      : '-'
+      : enc?.captureFps != null
+        ? `${Math.round(enc.captureFps)} fps captured, 0 sent`
+        : '-'
   $('stat-ping').textContent = session.rtt !== null ? `${session.rtt} ms` : '-'
   $('stat-delay').textContent = session.partner?.video != null ? `${session.partner.video} ms` : '-'
   $('stat-mode').textContent = session.partner ? (session.partner.mode === 'playfield' ? 'Local map' : 'Stream') : '-'
