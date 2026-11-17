@@ -26,6 +26,7 @@ export type EncoderStats = {
   hardware: boolean | null
   limitation: string | null
   link: RTCPeerConnectionState | 'none'
+  linkNote: string | null
   captureFps: number | null
   framesEncoded: number
   track: 'live' | 'muted' | 'ended' | 'none'
@@ -41,6 +42,8 @@ type Handlers = {
 const VIDEO_STATES = ['ok', 'connecting', 'network', 'host-capture', 'decode'] as const
 const RETRY_COOLDOWN_MS = 3000
 const STATS_INTERVAL_MS = 1000
+const VIDEO_RECALL_MS = 2000
+const VIDEO_RECALL_LIMIT = 5
 
 const SHARE_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
 
@@ -131,6 +134,10 @@ export class HostSession {
   private peer: Peer | null = null
   private audioCalls: MediaConnection[] = []
   private videoCall: MediaConnection | null = null
+  private videoNote: string | null = null
+  private videoIce: string | null = null
+  private videoRecalls = 0
+  private videoRecallTimer: ReturnType<typeof setTimeout> | null = null
   private lastRetry = 0
   private guestId: string | null = null
   private ctrl: DataConnection | null = null
@@ -276,27 +283,79 @@ export class HostSession {
   private callVideo(tuned: boolean) {
     const peer = this.peer
     const tracks = this.stream?.getVideoTracks().filter((t) => t.readyState === 'live') ?? []
-    if (!peer || peer.destroyed || !this.guestId || tracks.length === 0) return
-    this.videoCall?.close()
+    if (!peer || peer.destroyed || !this.guestId) return
+    if (tracks.length === 0) {
+      this.videoNote = 'no live capture track'
+      return
+    }
+    this.clearVideoRecall()
+    this.dropVideoCall()
     const codec = tuned && this.quality.codec === 'h264' ? 'H264' : null
     const call = peer.call(this.guestId, new MediaStream(tracks), {
       sdpTransform: (sdp: string) => (codec ? preferCodec(sdp, codec) : sdp),
     })
     this.videoCall = call
+    this.videoIce = null
     this.lastEncode = { frames: 0, seconds: 0 }
-    const pc = call.peerConnection
-    if (!tuned || !pc) return
-    pc.addEventListener('connectionstatechange', () => {
-      if (pc.connectionState === 'connected') void tuneVideoSenders(pc, this.quality)
+
+    call.on('error', (err) => {
+      console.error('[osu-coop] video call error:', err)
+      if (this.videoCall === call) this.videoNote = `${err.type}: ${err.message}`
     })
+    call.on('iceStateChanged', (state) => {
+      if (this.videoCall === call) this.videoIce = state
+    })
+    // PeerJS closes the call on its own when ICE fails or negotiation errors, which leaves the
+    // partner with no video. Call again, untuned, so a rejected codec setting can't stick.
+    call.on('close', () => {
+      if (this.videoCall !== call) return
+      this.videoCall = null
+      this.videoNote ??= `closed, ICE ${this.videoIce ?? 'never started'}`
+      console.warn('[osu-coop] video call closed:', this.videoNote)
+      this.scheduleVideoRecall()
+    })
+
+    const pc = call.peerConnection
+    if (!pc) return
+    pc.addEventListener('connectionstatechange', () => {
+      if (this.videoCall !== call) return
+      if (pc.connectionState === 'connected') {
+        this.videoNote = null
+        this.videoRecalls = 0
+        if (tuned) void tuneVideoSenders(pc, this.quality)
+      }
+    })
+  }
+
+  private dropVideoCall() {
+    const call = this.videoCall
+    this.videoCall = null
+    call?.close()
+  }
+
+  private scheduleVideoRecall() {
+    if (this.videoRecallTimer || !this.ctrl?.open || this.videoRecalls >= VIDEO_RECALL_LIMIT) return
+    this.videoRecalls++
+    this.videoRecallTimer = setTimeout(() => {
+      this.videoRecallTimer = null
+      if (this.ctrl?.open && !this.videoCall) this.callVideo(false)
+    }, VIDEO_RECALL_MS)
+  }
+
+  private clearVideoRecall() {
+    if (this.videoRecallTimer) clearTimeout(this.videoRecallTimer)
+    this.videoRecallTimer = null
   }
 
   private closeLink() {
     this.stopStats()
     this.audioCalls.forEach((call) => call.close())
     this.audioCalls = []
-    this.videoCall?.close()
-    this.videoCall = null
+    this.clearVideoRecall()
+    this.dropVideoCall()
+    this.videoNote = null
+    this.videoIce = null
+    this.videoRecalls = 0
     this.input?.close()
     this.input = null
     this.ctrl = null
@@ -412,6 +471,7 @@ export class HostSession {
       hardware: null,
       limitation: null,
       link: pc?.connectionState ?? 'none',
+      linkNote: this.videoNote,
       captureFps: null,
       framesEncoded: 0,
       track: !track ? 'none' : track.readyState === 'ended' ? 'ended' : track.muted ? 'muted' : 'live',

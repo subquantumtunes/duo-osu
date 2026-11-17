@@ -176,9 +176,9 @@ function render() {
       : enc.track !== 'live'
         ? `Capture ${enc.track}`
         : enc.link !== 'connected'
-          ? `Video link ${enc.link}`
+          ? `Video link ${enc.link}${enc.linkNote ? ` (${enc.linkNote})` : ''}`
           : 'No frames encoded'
-  $('stat-encoder').title = enc?.name ?? ''
+  $('stat-encoder').title = enc?.name ?? enc?.linkNote ?? ''
   $('stat-encode').textContent = enc?.encodeMs != null ? `${enc.encodeMs.toFixed(1)} ms` : '-'
   $('stat-fps').textContent =
     enc?.fps != null
