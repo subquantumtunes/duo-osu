@@ -42,50 +42,40 @@ type Handlers = {
   onRelease: () => void
 }
 
+const SHARE_AUDIO = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+} as MediaTrackConstraints
+
 const PREFERRED_SHARE = {
-  video: { frameRate: { ideal: 60, max: 60 }, displaySurface: 'monitor' },
-  audio: true,
+  video: { frameRate: { ideal: 60 } },
+  audio: SHARE_AUDIO,
   systemAudio: 'include',
   selfBrowserSurface: 'exclude',
-  surfaceSwitching: 'include',
 } as DisplayMediaStreamOptions
+
+const PLAIN_SHARE: DisplayMediaStreamOptions = { video: true, audio: true }
 
 function errorName(err: unknown) {
   return err instanceof Error ? err.name : ''
 }
 
-function isUserCancel(err: unknown) {
-  if (errorName(err) !== 'NotAllowedError') return false
-  const message = err instanceof Error ? err.message.toLowerCase() : ''
-  return !message.includes('system') && !message.includes('policy')
-}
-
-// Some browsers reject the extended capture hints, or fail when the chosen
-// surface has no capturable audio. Those failures happen before or instead of
-// the picker, so retrying with plainer options is safe; a user cancel is not retried.
+// Only TypeError and OverconstrainedError are raised before the picker opens,
+// so they are the only failures worth retrying. Anything else happens after the
+// user has already picked a screen, and retrying would reopen the picker and
+// silently drop audio.
 async function requestScreenShare(): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getDisplayMedia) {
     throw new DOMException('getDisplayMedia unavailable', 'NotSupportedError')
   }
-  const attempts: DisplayMediaStreamOptions[] = [
-    PREFERRED_SHARE,
-    { video: { frameRate: { ideal: 60 } }, audio: true },
-    { video: true },
-  ]
-  let lastError: unknown
-  for (const options of attempts) {
-    try {
-      return await navigator.mediaDevices.getDisplayMedia(options)
-    } catch (err) {
-      lastError = err
-      if (isUserCancel(err)) throw err
-      const name = errorName(err)
-      if (name !== 'TypeError' && name !== 'OverconstrainedError' && name !== 'NotReadableError' && name !== 'AbortError') {
-        throw err
-      }
-    }
+  try {
+    return await navigator.mediaDevices.getDisplayMedia(PREFERRED_SHARE)
+  } catch (err) {
+    const name = errorName(err)
+    if (name !== 'TypeError' && name !== 'OverconstrainedError') throw err
+    return navigator.mediaDevices.getDisplayMedia(PLAIN_SHARE)
   }
-  throw lastError
 }
 
 function describeShareError(err: unknown) {
@@ -109,7 +99,7 @@ function describeShareError(err: unknown) {
     return 'Screen sharing was cancelled. Click Start sharing, choose your screen in the picker, then click Share.'
   }
   if (name === 'NotReadableError' || name === 'AbortError') {
-    return 'The browser couldn’t capture that screen. Close other apps that are recording the screen, or try sharing a different screen.'
+    return 'The browser couldn’t start capturing that screen or its audio. Close other apps that are recording the screen or using your audio device exclusively, then click Start sharing once more.'
   }
   return `Screen sharing failed${name ? ` (${name})` : ''}. Try again in a fresh ${opera ? 'Opera' : 'Chrome or Edge'} tab.`
 }
