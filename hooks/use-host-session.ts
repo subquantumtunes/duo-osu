@@ -8,7 +8,9 @@ import {
   type Role,
   type TapSlot,
   ROOM_PREFIX,
+  decodeInput,
   makeRoomCode,
+  openInputChannel,
   tuneScreenSenders,
 } from '@/lib/protocol'
 
@@ -31,10 +33,12 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
 
   const peerRef = useRef<Peer | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const callRef = useRef<MediaConnection | null>(null)
+  const callsRef = useRef<MediaConnection[]>([])
   const guestIdRef = useRef<string | null>(null)
   const ctrlRef = useRef<DataConnection | null>(null)
-  const lastAimSeq = useRef(-1)
+  const inputRef = useRef<RTCDataChannel | null>(null)
+  const lastAimSeq = useRef(0)
+  const lastKeySeq = useRef(0)
   const guestRoleRef = useRef(guestRole)
   const handlersRef = useRef(handlers)
 
@@ -42,30 +46,54 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     handlersRef.current = handlers
   })
 
-  const dropGuest = useCallback(() => {
-    handlersRef.current.onRelease()
-    callRef.current?.close()
-    callRef.current = null
+  const closeLink = useCallback(() => {
+    callsRef.current.forEach((call) => call.close())
+    callsRef.current = []
+    inputRef.current?.close()
+    inputRef.current = null
     ctrlRef.current = null
     guestIdRef.current = null
-    lastAimSeq.current = -1
+    lastAimSeq.current = 0
+    lastKeySeq.current = 0
+  }, [])
+
+  const dropGuest = useCallback(() => {
+    handlersRef.current.onRelease()
+    closeLink()
     setRtt(null)
     if (peerRef.current && !peerRef.current.destroyed) setStatus('waiting')
+  }, [closeLink])
+
+  // Key events come in twice (fast lossy + reliable). Applying strictly in sequence means the
+  // first copy wins and a lost fast copy is filled in by the reliable one.
+  const applyKey = useCallback((n: number, slot: TapSlot, down: boolean) => {
+    if (guestRoleRef.current !== 'tap' || n !== lastKeySeq.current + 1) return
+    lastKeySeq.current = n
+    handlersRef.current.onKey(slot, down)
   }, [])
+
+  const handleInput = useCallback(
+    (event: MessageEvent) => {
+      const packet = decodeInput(event.data)
+      if (!packet) return
+      if (packet.t === 'aim') {
+        if (guestRoleRef.current !== 'aim' || packet.s <= lastAimSeq.current) return
+        lastAimSeq.current = packet.s
+        handlersRef.current.onAim(packet.x, packet.y)
+      } else {
+        applyKey(packet.n, packet.k, packet.down)
+      }
+    },
+    [applyKey],
+  )
 
   const handleMessage = useCallback((raw: unknown) => {
     const msg = raw as GuestMessage
     if (!msg || typeof msg !== 'object') return
-    const role = guestRoleRef.current
     switch (msg.t) {
-      case 'aim':
-        if (role !== 'aim' || msg.s <= lastAimSeq.current) return
-        lastAimSeq.current = msg.s
-        handlersRef.current.onAim(msg.x, msg.y)
-        break
       case 'key':
-        if (role !== 'tap' || (msg.k !== 'k1' && msg.k !== 'k2')) return
-        handlersRef.current.onKey(msg.k, Boolean(msg.down))
+        if ((msg.k !== 'k1' && msg.k !== 'k2') || typeof msg.n !== 'number') return
+        applyKey(msg.n, msg.k, Boolean(msg.down))
         break
       case 'release':
         handlersRef.current.onRelease()
@@ -75,16 +103,13 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         if (typeof msg.rtt === 'number') setRtt(msg.rtt)
         break
     }
-  }, [])
+  }, [applyKey])
 
   const stop = useCallback(() => {
     handlersRef.current.onRelease()
-    callRef.current?.close()
+    closeLink()
     peerRef.current?.destroy()
     peerRef.current = null
-    callRef.current = null
-    ctrlRef.current = null
-    guestIdRef.current = null
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
     setStream(null)
@@ -155,14 +180,22 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
       if (conn.label === 'ctrl') {
         ctrlRef.current = conn
         conn.on('open', () => {
+          const input = openInputChannel(conn.peerConnection)
+          if (input) input.onmessage = handleInput
+          inputRef.current = input
           conn.send({ t: 'welcome', guestRole: guestRoleRef.current } satisfies HostMessage)
           const current = streamRef.current
           if (!current) return
-          const call = peer.call(conn.peer, current)
-          callRef.current = call
-          const pc = call.peerConnection
-          pc?.addEventListener('connectionstatechange', () => {
-            if (pc.connectionState === 'connected') void tuneScreenSenders(pc)
+          // Separate calls keep audio and video in different sync groups, so the video isn't
+          // delayed to line up with the audio jitter buffer.
+          const groups = [current.getVideoTracks(), current.getAudioTracks()].filter((g) => g.length > 0)
+          callsRef.current = groups.map((tracks) => {
+            const call = peer.call(conn.peer, new MediaStream(tracks))
+            const pc = call.peerConnection
+            pc?.addEventListener('connectionstatechange', () => {
+              if (pc.connectionState === 'connected') void tuneScreenSenders(pc)
+            })
+            return call
           })
           setStatus('connected')
         })
@@ -170,7 +203,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         conn.on('error', dropGuest)
       }
     })
-  }, [dropGuest, handleMessage, stop])
+  }, [dropGuest, handleInput, handleMessage, stop])
 
   useEffect(() => {
     guestRoleRef.current = guestRole

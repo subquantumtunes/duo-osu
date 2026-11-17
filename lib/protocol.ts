@@ -2,8 +2,7 @@ export type Role = 'aim' | 'tap'
 export type TapSlot = 'k1' | 'k2'
 
 export type GuestMessage =
-  | { t: 'aim'; x: number; y: number; s: number }
-  | { t: 'key'; k: TapSlot; down: boolean }
+  | { t: 'key'; k: TapSlot; down: boolean; n: number }
   | { t: 'release' }
   | { t: 'ping'; ts: number; rtt?: number }
 
@@ -40,6 +39,62 @@ export function formatKey(key: string) {
   return key.length === 1 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1)
 }
 
+/**
+ * A pre-negotiated, unordered, zero-retransmit channel on the same peer connection as the
+ * control channel. PeerJS's `reliable: false` only disables ordering and still retransmits,
+ * which makes stale cursor packets queue up behind lost ones.
+ */
+export function openInputChannel(pc: RTCPeerConnection | undefined) {
+  if (!pc) return null
+  try {
+    const channel = pc.createDataChannel('input', { negotiated: true, id: 1000, ordered: false, maxRetransmits: 0 })
+    channel.binaryType = 'arraybuffer'
+    return channel
+  } catch {
+    return null
+  }
+}
+
+const PACKET_AIM = 1
+const PACKET_KEY = 2
+
+export function encodeAim(seq: number, x: number, y: number) {
+  const view = new DataView(new ArrayBuffer(9))
+  view.setUint8(0, PACKET_AIM)
+  view.setUint32(1, seq)
+  view.setUint16(5, Math.round(x * 65535))
+  view.setUint16(7, Math.round(y * 65535))
+  return view.buffer
+}
+
+export function encodeKey(seq: number, slot: TapSlot, down: boolean) {
+  const view = new DataView(new ArrayBuffer(7))
+  view.setUint8(0, PACKET_KEY)
+  view.setUint32(1, seq)
+  view.setUint8(5, slot === 'k1' ? 1 : 2)
+  view.setUint8(6, down ? 1 : 0)
+  return view.buffer
+}
+
+export type InputPacket =
+  | { t: 'aim'; s: number; x: number; y: number }
+  | { t: 'key'; n: number; k: TapSlot; down: boolean }
+
+export function decodeInput(data: unknown): InputPacket | null {
+  if (!(data instanceof ArrayBuffer) || data.byteLength < 7) return null
+  const view = new DataView(data)
+  const type = view.getUint8(0)
+  if (type === PACKET_AIM && data.byteLength >= 9) {
+    return { t: 'aim', s: view.getUint32(1), x: view.getUint16(5) / 65535, y: view.getUint16(7) / 65535 }
+  }
+  if (type === PACKET_KEY) {
+    const slot = view.getUint8(5)
+    if (slot !== 1 && slot !== 2) return null
+    return { t: 'key', n: view.getUint32(1), k: slot === 1 ? 'k1' : 'k2', down: view.getUint8(6) === 1 }
+  }
+  return null
+}
+
 /** Lowers receive-side buffering so the stream trades smoothness for latency. */
 export function minimizePlayoutDelay(pc: RTCPeerConnection | undefined) {
   if (!pc) return
@@ -60,6 +115,9 @@ export async function tuneScreenSenders(pc: RTCPeerConnection | undefined) {
     if (!params.encodings?.length) continue
     params.encodings[0].maxBitrate = 10_000_000
     params.encodings[0].maxFramerate = 60
+    // Encoding above 1080p adds noticeable per-frame latency on most machines.
+    const height = sender.track.getSettings().height ?? 0
+    params.encodings[0].scaleResolutionDownBy = height > 1080 ? height / 1080 : 1
     ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
       'maintain-framerate'
     try {
