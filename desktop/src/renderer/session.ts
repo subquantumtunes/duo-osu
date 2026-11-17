@@ -274,7 +274,7 @@ export class HostSession {
       this.closeLink()
     }
     this.guestId = conn.peer
-    conn.on('data', (raw) => this.handleMessage(raw))
+    conn.on('data', (raw) => this.handleMessage(raw, conn))
     if (conn.label !== 'ctrl') return
 
     this.ctrl = conn
@@ -291,7 +291,8 @@ export class HostSession {
         this.videoNote = 'no screen capture'
         return
       }
-      this.callVideo(true)
+      this.guestId = conn.peer
+      this.callVideo(true, conn.peer)
       // Separate calls keep audio and video in different sync groups, so the video isn't held
       // back to line up with the audio jitter buffer.
       const audio = this.stream.getAudioTracks()
@@ -301,14 +302,17 @@ export class HostSession {
     conn.on('close', () => {
       if (this.ctrl === conn) this.dropGuest()
     })
-    conn.on('error', () => {
-      if (this.ctrl === conn) this.dropGuest()
+    // PeerJS reports some recoverable problems as errors while the link keeps working, so only
+    // drop the partner if the link actually went down.
+    conn.on('error', (err) => {
+      console.warn('[osu-coop] ctrl link error:', err)
+      if (this.ctrl === conn && !conn.open) this.dropGuest()
     })
   }
 
   // A retry sends the stream untuned with the default codec, in case the hardware encoder
   // rejects the tuned parameters and sends nothing.
-  private callVideo(tuned: boolean) {
+  private callVideo(tuned: boolean, target?: string) {
     const peer = this.peer
     const tracks = this.stream?.getVideoTracks().filter((t) => t.readyState === 'live') ?? []
     if (!peer || peer.destroyed) {
@@ -316,11 +320,13 @@ export class HostSession {
       console.warn('[osu-coop] video call skipped:', this.videoNote)
       return
     }
-    if (!this.guestId) {
-      this.videoNote = 'no partner id'
+    const partnerId = target ?? this.ctrl?.peer ?? this.guestId
+    if (!partnerId) {
+      this.videoNote = `no partner id (link ${this.ctrl ? (this.ctrl.open ? 'open' : 'not open') : 'missing'})`
       console.warn('[osu-coop] video call skipped:', this.videoNote)
       return
     }
+    this.guestId = partnerId
     if (tracks.length === 0) {
       this.videoNote = 'no live capture track'
       return
@@ -332,7 +338,7 @@ export class HostSession {
     // server, even though the existing data link to the partner keeps working.
     let call: MediaConnection | undefined
     try {
-      call = peer.call(this.guestId, new MediaStream(tracks), {
+      call = peer.call(partnerId, new MediaStream(tracks), {
         sdpTransform: (sdp: string) => (codec ? preferCodec(sdp, codec) : sdp),
       })
     } catch (err) {
@@ -459,9 +465,17 @@ export class HostSession {
     else if (packet.t === 'key') this.applyKey(packet.n, packet.k, packet.down)
   }
 
-  private handleMessage(raw: unknown) {
+  private handleMessage(raw: unknown, from: DataConnection) {
     const msg = raw as GuestMessage
     if (!msg || typeof msg !== 'object') return
+    // The partner is still talking on a link the host already let go of, so take it back.
+    if (!this.ctrl && from.label === 'ctrl' && from.open) {
+      console.warn('[osu-coop] re-adopting live partner link')
+      this.ctrl = from
+      this.guestId = from.peer
+      this.startStats()
+      this.setStatus('connected')
+    }
     switch (msg.t) {
       case 'key':
         if ((msg.k !== 'k1' && msg.k !== 'k2') || typeof msg.n !== 'number') return
@@ -479,7 +493,7 @@ export class HostSession {
         if (now - this.lastRetry < RETRY_COOLDOWN_MS) return
         this.lastRetry = now
         this.videoRecalls = 0
-        this.callVideo(false)
+        this.callVideo(false, from.peer)
         break
       }
       case 'ping': {
