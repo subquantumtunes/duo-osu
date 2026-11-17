@@ -467,8 +467,9 @@ namespace OsuCoop
                 if (length == 126) length = (Next() << 8) | Next();
                 else if (length == 127)
                 {
-                    length = 0;
-                    for (int n = 0; n < 8; n++) length = (length << 8) | (long)Next();
+                    ulong longLength = 0;
+                    for (int n = 0; n < 8; n++) longLength = (longLength << 8) | (uint)Next();
+                    length = longLength > (ulong)MaxMessage ? MaxMessage + 1L : (long)longLength;
                 }
                 if (!masked || length > MaxMessage) { Close(); return null; }
                 byte[] mask = ReadExact(4);
@@ -952,7 +953,7 @@ namespace OsuCoop
 '@
 
 try {
-    Add-Type -TypeDefinition $BridgeSource -Language CSharp
+    Add-Type -TypeDefinition $BridgeSource -Language CSharp -IgnoreWarnings
     [OsuCoop.Bridge]::Run($Port, $AreaX, $AreaY, $AreaWidth, $AreaHeight, $TosuPort, -not $FollowOsu)
 }
 catch {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useSyncExternalStore } from 'react'
+import { useState } from 'react'
 import { Check, Copy, Download, ExternalLink, Plug, Unplug } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
@@ -9,12 +9,12 @@ import { DEFAULT_BRIDGE_PORT } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
 import { Panel } from './panel'
 
-const WINDOWS_BRIDGE_PATH = '/osu-coop-bridge.cmd'
+// Preview and branch deployments sit behind Vercel login, which PowerShell can't pass, so always
+// serve the bridge from the public production domain.
+const PUBLIC_ORIGIN = 'https://duo-osu.vercel.app'
+const WINDOWS_BRIDGE_URL = `${PUBLIC_ORIGIN}/osu-coop-bridge.cmd`
 const PYTHON_BRIDGE_PATH = '/osu-coop-bridge.py'
-
-function noopSubscribe() {
-  return () => {}
-}
+const RUN_COMMAND = `powershell -NoProfile -ExecutionPolicy Bypass -c "[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm ${WINDOWS_BRIDGE_URL} | iex"`
 
 const STATUS_TEXT: Record<BridgeStatus, string> = {
   disconnected: 'Not connected',
@@ -75,12 +75,7 @@ export function BridgePanel({
 }) {
   const [token, setToken] = useState('')
   const connected = status === 'connected'
-  const origin = useSyncExternalStore(
-    noopSubscribe,
-    () => window.location.origin,
-    () => '',
-  )
-  const runCommand = `powershell -ExecutionPolicy Bypass -c "irm ${origin}${WINDOWS_BRIDGE_PATH} | iex"`
+  const runCommand = RUN_COMMAND
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   async function copyCommand() {
@@ -107,16 +102,9 @@ export function BridgePanel({
         <li>If your browser asks to access devices on your local network, allow it.</li>
       </ol>
       <a
-        href={WINDOWS_BRIDGE_PATH}
-        download="osu-coop-bridge.cmd"
+        href={WINDOWS_BRIDGE_URL}
         target="_blank"
         rel="noopener"
-        onClick={(e) => {
-          if (window.self !== window.top) {
-            e.preventDefault()
-            window.open(WINDOWS_BRIDGE_PATH, '_blank', 'noopener')
-          }
-        }}
         className={cn(buttonVariants({ variant: 'outline' }), 'w-fit')}
       >
         <Download aria-hidden="true" />
