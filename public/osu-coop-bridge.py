@@ -208,9 +208,13 @@ class OsuWatcher:
     async def _follow_precise(self, url):
         try:
             async with websockets.connect(url, max_size=None) as ws:
-                self.precise = True
+                # Newer tosu builds dropped currentTime from the precise feed; only switch
+                # away from beatmap.time.live once this feed actually carries a time.
                 async for raw in ws:
-                    self._time(json.loads(raw).get("currentTime"))
+                    current = json.loads(raw).get("currentTime")
+                    if isinstance(current, (int, float)):
+                        self.precise = True
+                        self._time(current)
         except Exception:
             pass
         finally:

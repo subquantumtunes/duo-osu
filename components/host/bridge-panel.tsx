@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Check, Copy, Download, ExternalLink, Plug, Unplug } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
@@ -9,7 +9,12 @@ import { DEFAULT_BRIDGE_PORT } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
 import { Panel } from './panel'
 
-const BRIDGE_PATH = '/osu-coop-bridge.py'
+const WINDOWS_BRIDGE_PATH = '/osu-coop-bridge.cmd'
+const PYTHON_BRIDGE_PATH = '/osu-coop-bridge.py'
+
+function noopSubscribe() {
+  return () => {}
+}
 
 const STATUS_TEXT: Record<BridgeStatus, string> = {
   disconnected: 'Not connected',
@@ -70,13 +75,17 @@ export function BridgePanel({
 }) {
   const [token, setToken] = useState('')
   const connected = status === 'connected'
+  const origin = useSyncExternalStore(
+    noopSubscribe,
+    () => window.location.origin,
+    () => '',
+  )
+  const runCommand = `powershell -ExecutionPolicy Bypass -c "irm ${origin}${WINDOWS_BRIDGE_PATH} | iex"`
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
-  async function copyScript() {
+  async function copyCommand() {
     try {
-      const res = await fetch(BRIDGE_PATH)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      await navigator.clipboard.writeText(await res.text())
+      await navigator.clipboard.writeText(runCommand)
       setCopyState('copied')
       setTimeout(() => setCopyState('idle'), 2000)
     } catch {
@@ -86,49 +95,66 @@ export function BridgePanel({
 
   return (
     <Panel step={2} title="Run the input bridge">
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Runs on this PC (the one with osu!). Your partner doesn&apos;t need it. Nothing to install on Windows.
+      </p>
       <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-xs leading-relaxed text-muted-foreground">
         <li>
-          Install Python, then run <code className="rounded bg-secondary px-1 py-0.5 font-mono text-foreground">pip install websockets pynput</code>
+          Download the bridge and double-click it. If Windows says it protected your PC, click{' '}
+          <span className="text-foreground">More info</span>, then <span className="text-foreground">Run anyway</span>.
         </li>
-        <li>
-          Run <code className="rounded bg-secondary px-1 py-0.5 font-mono text-foreground">python osu-coop-bridge.py</code> and
-          paste the pairing code below.
-        </li>
-        <li>
-          If your browser asks to access devices on your local network, allow it.
-        </li>
+        <li>Paste the pairing code from the bridge window below.</li>
+        <li>If your browser asks to access devices on your local network, allow it.</li>
       </ol>
-      <div className="flex flex-wrap items-center gap-2">
-        <a
-          href={BRIDGE_PATH}
-          download="osu-coop-bridge.py"
-          target="_blank"
-          rel="noopener"
-          onClick={(e) => {
-            if (window.self !== window.top) {
-              e.preventDefault()
-              window.open(BRIDGE_PATH, '_blank', 'noopener')
-            }
-          }}
-          className={cn(buttonVariants({ variant: 'outline' }), 'w-fit')}
-        >
-          <Download aria-hidden="true" />
-          Download bridge
-        </a>
-        <Button type="button" variant="ghost" onClick={copyScript}>
-          {copyState === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-          {copyState === 'copied' ? 'Copied' : 'Copy script'}
-        </Button>
-      </div>
-      {copyState === 'failed' && (
-        <p role="alert" className="text-xs text-destructive">
-          {"Couldn't copy here. Open "}
-          <a href={BRIDGE_PATH} target="_blank" rel="noopener" className="underline underline-offset-2">
-            the script
-          </a>
-          {' in a new tab and save it as osu-coop-bridge.py.'}
+      <a
+        href={WINDOWS_BRIDGE_PATH}
+        download="osu-coop-bridge.cmd"
+        target="_blank"
+        rel="noopener"
+        onClick={(e) => {
+          if (window.self !== window.top) {
+            e.preventDefault()
+            window.open(WINDOWS_BRIDGE_PATH, '_blank', 'noopener')
+          }
+        }}
+        className={cn(buttonVariants({ variant: 'outline' }), 'w-fit')}
+      >
+        <Download aria-hidden="true" />
+        Download bridge for Windows
+      </a>
+      <div className="flex flex-col gap-1.5">
+        <p className="text-xs text-muted-foreground">
+          Or skip the download: press <kbd className="rounded border border-border px-1 font-mono text-foreground">Win</kbd>{' '}
+          + <kbd className="rounded border border-border px-1 font-mono text-foreground">R</kbd>, paste this, and press
+          Enter.
         </p>
-      )}
+        <div className="flex items-stretch gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-secondary px-2.5 py-1.5 font-mono text-xs text-foreground" title={runCommand}>
+            {runCommand}
+          </code>
+          <Button type="button" variant="secondary" size="sm" onClick={copyCommand} className="h-auto">
+            {copyState === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+            {copyState === 'copied' ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        {copyState === 'failed' && (
+          <p role="alert" className="text-xs text-destructive">
+            {"Couldn't copy here. Select the command and copy it manually."}
+          </p>
+        )}
+      </div>
+      <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer select-none hover:text-foreground">Mac, Linux, or prefer Python?</summary>
+        <p className="mt-1.5 leading-relaxed">
+          Install Python, run{' '}
+          <code className="rounded bg-secondary px-1 py-0.5 font-mono text-foreground">pip install websockets pynput</code>
+          , then{' '}
+          <a href={PYTHON_BRIDGE_PATH} download="osu-coop-bridge.py" className="text-foreground underline underline-offset-2">
+            download the Python bridge
+          </a>{' '}
+          and run <code className="rounded bg-secondary px-1 py-0.5 font-mono text-foreground">python osu-coop-bridge.py</code>.
+        </p>
+      </details>
       <form
         className="flex gap-2"
         onSubmit={(e) => {

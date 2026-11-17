@@ -15,6 +15,13 @@ const nextConfig = {
           { key: 'Content-Disposition', value: 'attachment; filename="osu-coop-bridge.py"' },
         ],
       },
+      {
+        source: '/osu-coop-bridge.cmd',
+        headers: [
+          { key: 'Content-Type', value: 'text/plain; charset=utf-8' },
+          { key: 'Content-Disposition', value: 'attachment; filename="osu-coop-bridge.cmd"' },
+        ],
+      },
     ]
   },
 }

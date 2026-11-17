@@ -5,7 +5,7 @@ const STEPS = [
   },
   {
     title: 'Bridge injects input',
-    body: 'Browsers cannot control your mouse or keyboard, so the host runs a small Python bridge that turns the partner’s input into real cursor moves and key presses.',
+    body: 'Browsers cannot control your mouse or keyboard, so the host runs a small bridge (one double-click on Windows, nothing to install) that turns the partner’s input into real cursor moves and key presses.',
   },
   {
     title: 'Split the controls',
