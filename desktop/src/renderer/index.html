@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>osu! co-op host</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>osu! co-op</span>
+        <span class="brand-sub">host</span>
+      </div>
+      <div class="chips" aria-live="polite">
+        <span id="chip-input" class="chip">Input</span>
+        <span id="chip-osu" class="chip">tosu</span>
+        <span id="chip-partner" class="chip">No partner</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="stage" aria-label="Session">
+        <div class="preview">
+          <video id="preview" muted autoplay playsinline aria-label="Preview of the shared screen"></video>
+          <div id="preview-empty" class="preview-empty">
+            <p class="preview-title">Nothing is being shared yet</p>
+            <p class="muted">Pick a screen on the right, then start hosting.</p>
+          </div>
+          <div class="keylights" aria-label="Partner keys">
+            <span id="light-k1" class="keylight">K1</span>
+            <span id="light-k2" class="keylight">K2</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="card room">
+            <span class="label">Room code</span>
+            <code id="room-code" class="room-code">------</code>
+            <p id="room-hint" class="muted small">Start hosting to get a code for your partner.</p>
+            <button id="copy-code" type="button" class="button" disabled>Copy code</button>
+          </div>
+
+          <div class="card">
+            <span class="label">Stream</span>
+            <dl class="stats">
+              <div><dt>Encoder</dt><dd id="stat-encoder">-</dd></div>
+              <div><dt>Encode time</dt><dd id="stat-encode">-</dd></div>
+              <div><dt>Sending</dt><dd id="stat-fps">-</dd></div>
+              <div><dt>Ping</dt><dd id="stat-ping">-</dd></div>
+              <div><dt>Stream delay</dt><dd id="stat-delay">-</dd></div>
+              <div><dt>Partner sees</dt><dd id="stat-mode">-</dd></div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <aside class="sidebar" aria-label="Setup">
+        <section class="card">
+          <h2><span class="step">1</span>Screen with osu!</h2>
+          <div id="screens" class="screens" role="radiogroup" aria-label="Screen to share"></div>
+          <button id="refresh-screens" type="button" class="link">Refresh screens</button>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">2</span>Your partner</h2>
+          <div class="segmented" role="radiogroup" aria-label="Partner role">
+            <button type="button" role="radio" data-role="tap">Taps</button>
+            <button type="button" role="radio" data-role="aim">Aims</button>
+          </div>
+          <p id="role-hint" class="muted small"></p>
+          <div id="bindings" class="bindings">
+            <label class="binding">
+              <span>K1 key in osu!</span>
+              <button id="bind-k1" type="button" class="button key"></button>
+            </label>
+            <label class="binding">
+              <span>K2 key in osu!</span>
+              <button id="bind-k2" type="button" class="button key"></button>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">3</span>Stream quality</h2>
+          <div class="fields">
+            <label class="field">
+              <span>Frame rate</span>
+              <select id="quality-fps">
+                <option value="60">60 fps</option>
+                <option value="120">120 fps</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Resolution</span>
+              <select id="quality-height">
+                <option value="720">720p (fastest)</option>
+                <option value="1080">1080p</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Encoder</span>
+              <select id="quality-codec">
+                <option value="h264">H.264, GPU if available</option>
+                <option value="auto">Browser default</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted small">Changes apply the next time you start hosting.</p>
+        </section>
+
+        <section class="card">
+          <button id="start" type="button" class="button primary">Start hosting</button>
+          <p id="error" class="error" role="alert"></p>
+        </section>
+
+        <section class="card">
+          <h2>Timing and offset</h2>
+          <div id="timing" class="timing"></div>
+        </section>
+      </aside>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

@@ -3,6 +3,11 @@
 # dependencies
 /node_modules
 
+# desktop host
+/desktop/node_modules
+/desktop/dist
+/desktop/release
+
 # next.js
 /.next/
 /out/
