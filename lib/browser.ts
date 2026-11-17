@@ -20,19 +20,10 @@ export const isOpera = (name: BrowserName) => name === 'opera' || name === 'oper
 export const SUPPORTED_BROWSERS = 'Chrome, Edge, Opera or Firefox'
 
 /**
- * PeerJS's defaults plus extra STUN servers and TCP/TLS TURN routes. Opera's VPN and its
- * "disable non-proxied UDP" WebRTC setting only let media through relays reached over TCP.
+ * STUN only. PeerJS's old public TURN hosts (eu-0/us-0.turn.peerjs.com) no longer resolve, so
+ * listing them just flooded logs with DNS errors. Add a TURN provider here if peers behind strict
+ * NATs or Opera's "disable non-proxied UDP" setting can't connect.
  */
 export const ICE_SERVERS: RTCIceServer[] = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
-  {
-    urls: [
-      'turn:eu-0.turn.peerjs.com:3478',
-      'turn:us-0.turn.peerjs.com:3478',
-      'turn:eu-0.turn.peerjs.com:3478?transport=tcp',
-      'turn:us-0.turn.peerjs.com:3478?transport=tcp',
-    ],
-    username: 'peerjs',
-    credential: 'peerjsp',
-  },
 ]

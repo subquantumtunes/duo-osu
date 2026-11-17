@@ -22,6 +22,7 @@ export class OsuWatcher {
   status: OsuStatus = { source: null, state: null, mods: 0, offset: null }
   map: OsuMap | null = null
   private checksum: string | null = null
+  private mapRetryAt = 0
   private precise = false
   private lastTimeSent = 0
   private stopped = false
@@ -92,7 +93,12 @@ export class OsuWatcher {
         const mods = state === PLAYING ? (data.play?.mods?.number ?? 0) : this.status.mods
         const offset = data.settings?.audio?.offset?.universal
         this.set({ state, mods, offset: typeof offset === 'number' ? offset : null })
-        void this.loadMap(data.beatmap?.checksum, data.folders?.songs, data.directPath?.beatmapFile)
+        const songs = data.folders?.songs
+        void this.loadMap(data.beatmap?.checksum, [
+          joinIfStrings(songs, data.folders?.beatmap, data.files?.beatmap),
+          joinIfStrings(data.directPath?.beatmapFile),
+          joinIfStrings(songs, data.directPath?.beatmapFile),
+        ])
         if (!this.precise) this.time(data.beatmap?.time?.live)
       },
     )
@@ -109,7 +115,7 @@ export class OsuWatcher {
         const bm = menu.bm ?? {}
         const file = bm.path?.file
         this.set({ state: menu.state ?? null, mods: menu.mods?.num ?? 0 })
-        void this.loadMap(bm.md5, data.settings?.folders?.songs, file ? path.join(bm.path?.folder ?? '', file) : null)
+        void this.loadMap(bm.md5, [joinIfStrings(data.settings?.folders?.songs, bm.path?.folder, file)])
         this.time(bm.time?.current)
       },
     )
@@ -131,20 +137,36 @@ export class OsuWatcher {
     this.events.time(value)
   }
 
-  private async loadMap(checksum: unknown, songs: unknown, relative: unknown) {
-    if (typeof checksum !== 'string' || !checksum || typeof relative !== 'string' || !relative) return
-    if (checksum === this.checksum) return
+  /** Tries each candidate path in order; tosu versions disagree on which fields hold the folder. */
+  private async loadMap(checksum: unknown, candidates: (string | null)[]) {
+    const files = [...new Set(candidates.filter((file): file is string => !!file && path.isAbsolute(file)))]
+    if (typeof checksum !== 'string' || !checksum || files.length === 0) return
+    if (checksum === this.checksum && (this.map || performance.now() < this.mapRetryAt)) return
     this.checksum = checksum
-    const file = path.join(typeof songs === 'string' ? songs : '', relative)
-    try {
-      if ((await stat(file)).size > MAX_MAP_BYTES) throw new Error('file is too large')
-      const text = await readFile(file, 'utf8')
-      if (this.checksum !== checksum) return
-      this.map = { checksum, text }
-      this.events.map(this.map)
-    } catch (err) {
-      console.warn(`[osu-coop] Couldn't read the beatmap file: ${err instanceof Error ? err.message : err}`)
-      this.map = null
+    this.mapRetryAt = performance.now() + RETRY_MS
+    let lastError: unknown = null
+    for (const file of files) {
+      try {
+        const info = await stat(file)
+        if (!info.isFile()) continue
+        if (info.size > MAX_MAP_BYTES) throw new Error('file is too large')
+        const text = await readFile(file, 'utf8')
+        if (this.checksum !== checksum) return
+        this.map = { checksum, text }
+        this.events.map(this.map)
+        return
+      } catch (err) {
+        lastError = err
+      }
     }
+    console.warn(
+      `[osu-coop] Couldn't read the beatmap file (tried ${files.join(', ')}): ${lastError instanceof Error ? lastError.message : (lastError ?? 'not found')}`,
+    )
+    this.map = null
   }
+}
+
+function joinIfStrings(...parts: unknown[]) {
+  if (parts.length === 0 || !parts.every((part): part is string => typeof part === 'string' && part.length > 0)) return null
+  return path.join(...parts)
 }
