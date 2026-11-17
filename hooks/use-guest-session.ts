@@ -11,6 +11,7 @@ import {
   decodeInput,
   encodeAim,
   encodeKey,
+  encodeProbe,
   minimizePlayoutDelay,
   openInputChannel,
 } from '@/lib/protocol'
@@ -77,10 +78,15 @@ export function useGuestSession(code: string) {
   const tracksRef = useRef<MediaStreamTrack[]>([])
   const aimSeq = useRef(0)
   const lastFallbackAim = useRef(0)
+  const inputOk = useRef(false)
+  const probeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const keySeq = useRef(0)
   const rttRef = useRef<number | undefined>(undefined)
 
   const resetLink = () => {
+    if (probeTimer.current) clearInterval(probeTimer.current)
+    probeTimer.current = null
+    inputOk.current = false
     inputRef.current?.close()
     inputRef.current = null
     ctrlRef.current = null
@@ -146,6 +152,17 @@ export function useGuestSession(code: string) {
           }
         }
         inputRef.current = input
+        if (input) {
+          if (probeTimer.current) clearInterval(probeTimer.current)
+          probeTimer.current = setInterval(() => {
+            if (inputOk.current || input.readyState === 'closed') {
+              if (probeTimer.current) clearInterval(probeTimer.current)
+              probeTimer.current = null
+            } else if (input.readyState === 'open') {
+              input.send(encodeProbe())
+            }
+          }, 250)
+        }
       })
       ctrl.on('data', (raw) => {
         const msg = raw as HostMessage
@@ -157,6 +174,8 @@ export function useGuestSession(code: string) {
           rttRef.current = value
           transitRef.current = value / 2
           setRtt(value)
+        } else if (msg.t === 'input-ok') {
+          inputOk.current = true
         } else if (msg.t === 'sync') {
           setSync({ live: msg.live, mods: msg.mods })
         } else if (msg.t === 'map') {
@@ -239,11 +258,11 @@ export function useGuestSession(code: string) {
 
   const sendAim = useCallback((x: number, y: number) => {
     const input = inputRef.current
-    if (input?.readyState === 'open') {
+    if (inputOk.current && input?.readyState === 'open') {
       if (input.bufferedAmount <= MAX_AIM_BUFFER) input.send(encodeAim(++aimSeq.current, x, y))
       return
     }
-    // Without the fast channel, fall back to the reliable one at a rate it can keep up with.
+    // Until the host confirms the fast channel delivers, use the reliable one at a rate it can keep up with.
     const ctrl = ctrlRef.current
     const now = performance.now()
     if (!ctrl?.open || now - lastFallbackAim.current < FALLBACK_AIM_MS) return

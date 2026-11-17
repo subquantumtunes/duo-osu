@@ -49,6 +49,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
   const inputRef = useRef<RTCDataChannel | null>(null)
   const lastAimSeq = useRef(0)
   const lastKeySeq = useRef(0)
+  const inputConfirmed = useRef(false)
   const guestRoleRef = useRef(guestRole)
   const handlersRef = useRef(handlers)
 
@@ -65,6 +66,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     guestIdRef.current = null
     lastAimSeq.current = 0
     lastKeySeq.current = 0
+    inputConfirmed.current = false
   }, [])
 
   const dropGuest = useCallback(() => {
@@ -93,6 +95,10 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     (event: MessageEvent) => {
       const packet = decodeInput(event.data)
       if (!packet) return
+      if (!inputConfirmed.current && ctrlRef.current?.open) {
+        inputConfirmed.current = true
+        ctrlRef.current.send({ t: 'input-ok' } satisfies HostMessage)
+      }
       if (packet.t === 'aim') applyAim(packet.s, packet.x, packet.y)
       else if (packet.t === 'key') applyKey(packet.n, packet.k, packet.down)
     },

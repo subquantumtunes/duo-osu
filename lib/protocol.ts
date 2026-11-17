@@ -11,6 +11,7 @@ export type HostMessage =
   | { t: 'welcome'; guestRole: Role }
   | { t: 'pong'; ts: number }
   | { t: 'full' }
+  | { t: 'input-ok' }
   | { t: 'sync'; live: boolean; mods: number }
   | { t: 'map'; id: string; i: number; n: number; d: string }
 
@@ -93,10 +94,19 @@ export function encodeClock(seq: number, time: number, rate: number, playing: bo
   return view.buffer
 }
 
+const PACKET_PROBE = 4
+
+export function encodeProbe() {
+  const view = new DataView(new ArrayBuffer(7))
+  view.setUint8(0, PACKET_PROBE)
+  return view.buffer
+}
+
 export type InputPacket =
   | { t: 'aim'; s: number; x: number; y: number }
   | { t: 'key'; n: number; k: TapSlot; down: boolean }
   | { t: 'clock'; s: number; time: number; rate: number; playing: boolean }
+  | { t: 'probe' }
 
 export function decodeInput(data: unknown): InputPacket | null {
   if (!(data instanceof ArrayBuffer) || data.byteLength < 7) return null
@@ -111,6 +121,7 @@ export function decodeInput(data: unknown): InputPacket | null {
       playing: view.getUint8(17) === 1,
     }
   }
+  if (type === PACKET_PROBE) return { t: 'probe' }
   if (type === PACKET_AIM && data.byteLength >= 9) {
     return { t: 'aim', s: view.getUint32(1), x: view.getUint16(5) / 65535, y: view.getUint16(7) / 65535 }
   }
