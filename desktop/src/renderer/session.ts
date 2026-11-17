@@ -257,12 +257,21 @@ export class HostSession {
   }
 
   private accept(peer: Peer, conn: DataConnection) {
-    if (this.guestId && this.guestId !== conn.peer) {
+    if (this.guestId && this.guestId !== conn.peer && this.ctrl?.open) {
       conn.on('open', () => {
         conn.send({ t: 'full' } satisfies HostMessage)
         setTimeout(() => conn.close(), 500)
       })
       return
+    }
+    if (conn.label === 'ctrl' && this.ctrl && this.ctrl !== conn) {
+      // The partner reconnected. Tear the old link down now so its late close event can't wipe
+      // out the new session's video call.
+      const old = this.ctrl
+      this.closeLink()
+      old.close()
+    } else if (this.guestId && this.guestId !== conn.peer) {
+      this.closeLink()
     }
     this.guestId = conn.peer
     conn.on('data', (raw) => this.handleMessage(raw))
@@ -270,23 +279,31 @@ export class HostSession {
 
     this.ctrl = conn
     conn.on('open', () => {
+      if (this.ctrl !== conn) return
       const input = openInputChannel(conn.peerConnection)
       if (input) input.onmessage = (event) => this.handleInput(event)
       this.input = input
       conn.send({ t: 'welcome', guestRole: this.guestRole } satisfies HostMessage)
       conn.send({ t: 'sync', ...this.sync } satisfies HostMessage)
       this.sendMap(conn)
-      if (!this.stream) return
+      this.startStats()
+      if (!this.stream) {
+        this.videoNote = 'no screen capture'
+        return
+      }
       this.callVideo(true)
       // Separate calls keep audio and video in different sync groups, so the video isn't held
       // back to line up with the audio jitter buffer.
       const audio = this.stream.getAudioTracks()
-      this.audioCalls = audio.length > 0 ? [peer.call(conn.peer, new MediaStream(audio))] : []
-      this.startStats()
+      this.audioCalls = audio.length > 0 ? [peer.call(conn.peer, new MediaStream(audio))].filter(Boolean) : []
       this.setStatus('connected')
     })
-    conn.on('close', () => this.dropGuest())
-    conn.on('error', () => this.dropGuest())
+    conn.on('close', () => {
+      if (this.ctrl === conn) this.dropGuest()
+    })
+    conn.on('error', () => {
+      if (this.ctrl === conn) this.dropGuest()
+    })
   }
 
   // A retry sends the stream untuned with the default codec, in case the hardware encoder
@@ -294,7 +311,16 @@ export class HostSession {
   private callVideo(tuned: boolean) {
     const peer = this.peer
     const tracks = this.stream?.getVideoTracks().filter((t) => t.readyState === 'live') ?? []
-    if (!peer || peer.destroyed || !this.guestId) return
+    if (!peer || peer.destroyed) {
+      this.videoNote = 'host peer closed'
+      console.warn('[osu-coop] video call skipped:', this.videoNote)
+      return
+    }
+    if (!this.guestId) {
+      this.videoNote = 'no partner id'
+      console.warn('[osu-coop] video call skipped:', this.videoNote)
+      return
+    }
     if (tracks.length === 0) {
       this.videoNote = 'no live capture track'
       return
@@ -304,9 +330,17 @@ export class HostSession {
     const codec = tuned && this.quality.codec === 'h264' ? 'H264' : null
     // PeerJS returns undefined instead of a call while the host is cut off from the signaling
     // server, even though the existing data link to the partner keeps working.
-    const call: MediaConnection | undefined = peer.call(this.guestId, new MediaStream(tracks), {
-      sdpTransform: (sdp: string) => (codec ? preferCodec(sdp, codec) : sdp),
-    })
+    let call: MediaConnection | undefined
+    try {
+      call = peer.call(this.guestId, new MediaStream(tracks), {
+        sdpTransform: (sdp: string) => (codec ? preferCodec(sdp, codec) : sdp),
+      })
+    } catch (err) {
+      console.error('[osu-coop] video call threw:', err)
+      this.videoNote = `call threw: ${err instanceof Error ? err.message : String(err)}`
+      this.scheduleVideoRecall()
+      return
+    }
     if (!call) {
       this.videoNote = peer.disconnected ? 'signaling server offline, retrying' : 'call could not start'
       console.warn('[osu-coop] video call not created:', this.videoNote)
@@ -488,6 +522,10 @@ export class HostSession {
   }
 
   private async readStats() {
+    if (this.ctrl?.open && this.stream && !this.videoCall && !this.videoRecallTimer && this.videoRecalls < VIDEO_RECALL_LIMIT) {
+      console.warn('[osu-coop] partner connected without a video call, calling again')
+      this.scheduleVideoRecall()
+    }
     const pc = this.videoCall?.peerConnection
     const track = this.stream?.getVideoTracks()[0]
     const next: EncoderStats = {
