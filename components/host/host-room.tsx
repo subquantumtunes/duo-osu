@@ -1,6 +1,11 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { clockRate } from '@/lib/beatmap'
+import { OffsetPanel } from './offset-panel'
+
+// tosu/gosumemory menu state while a map is being played.
+const OSU_PLAYING = 2
 import { SiteHeader } from '@/components/site-header'
 import { StatusBadge, pingTone } from '@/components/status-badge'
 import { useBridge } from '@/hooks/use-bridge'
@@ -21,7 +26,19 @@ export function HostRoom() {
   const aimRef = useRef<{ x: number; y: number } | null>(null)
 
   const bindings = useMemo(() => ({ k1, k2 }), [k1, k2])
-  const bridge = useBridge(bindings)
+  const sessionRef = useRef<ReturnType<typeof useHostSession> | null>(null)
+  const playRef = useRef({ playing: false, rate: 1 })
+  const bridge = useBridge(bindings, {
+    onOsu: (osu) => {
+      const playing = osu.source !== null && osu.state === OSU_PLAYING
+      playRef.current = { playing, rate: clockRate(osu.mods) }
+      sessionRef.current?.publishSync({ live: playing, mods: osu.mods })
+    },
+    onTime: (ms) => {
+      sessionRef.current?.publishClock(ms, playRef.current.rate, playRef.current.playing)
+    },
+    onMap: (checksum, text) => sessionRef.current?.publishMap(checksum, text),
+  })
   const { send } = bridge
 
   const onAim = useCallback(
@@ -45,6 +62,9 @@ export function HostRoom() {
   }, [send])
 
   const session = useHostSession(guestRole, { onAim, onKey, onRelease })
+  useEffect(() => {
+    sessionRef.current = session
+  })
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -73,6 +93,7 @@ export function HostRoom() {
           <RolePanel guestRole={guestRole} onChange={setGuestRole} k1={k1} k2={k2} onK1={setK1} onK2={setK2} />
           <BridgePanel status={bridge.status} screen={bridge.screen} onConnect={bridge.connect} onDisconnect={bridge.disconnect} />
           <SessionPanel session={session} bridgeReady={bridge.status === 'connected'} />
+          <OffsetPanel partner={session.partner} osu={bridge.osu} guestRole={guestRole} />
         </aside>
       </main>
     </div>

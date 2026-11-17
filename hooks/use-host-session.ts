@@ -7,12 +7,18 @@ import {
   type HostMessage,
   type Role,
   type TapSlot,
+  MAP_CHUNK_CHARS,
   ROOM_PREFIX,
   decodeInput,
+  encodeClock,
   makeRoomCode,
   openInputChannel,
   tuneScreenSenders,
 } from '@/lib/protocol'
+import type { PartnerStats } from '@/lib/timing'
+
+type SyncState = { live: boolean; mods: number }
+type MapFile = { checksum: string; text: string }
 
 export type HostStatus = 'idle' | 'starting' | 'waiting' | 'connected' | 'error'
 
@@ -30,7 +36,11 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
   const [hasAudio, setHasAudio] = useState(false)
   const [surface, setSurface] = useState<string | null>(null)
   const [rtt, setRtt] = useState<number | null>(null)
+  const [partner, setPartner] = useState<PartnerStats | null>(null)
 
+  const syncRef = useRef<SyncState>({ live: false, mods: 0 })
+  const mapRef = useRef<MapFile | null>(null)
+  const clockSeq = useRef(0)
   const peerRef = useRef<Peer | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const callsRef = useRef<MediaConnection[]>([])
@@ -61,6 +71,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     handlersRef.current.onRelease()
     closeLink()
     setRtt(null)
+    setPartner(null)
     if (peerRef.current && !peerRef.current.destroyed) setStatus('waiting')
   }, [closeLink])
 
@@ -80,7 +91,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         if (guestRoleRef.current !== 'aim' || packet.s <= lastAimSeq.current) return
         lastAimSeq.current = packet.s
         handlersRef.current.onAim(packet.x, packet.y)
-      } else {
+      } else if (packet.t === 'key') {
         applyKey(packet.n, packet.k, packet.down)
       }
     },
@@ -100,7 +111,14 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         break
       case 'ping':
         ctrlRef.current?.send({ t: 'pong', ts: msg.ts } satisfies HostMessage)
-        if (typeof msg.rtt === 'number') setRtt(msg.rtt)
+        if (typeof msg.rtt === 'number') {
+          setRtt(msg.rtt)
+          setPartner({
+            rtt: msg.rtt,
+            video: typeof msg.video === 'number' ? msg.video : null,
+            mode: msg.mode === 'playfield' ? 'playfield' : 'video',
+          })
+        }
         break
     }
   }, [applyKey])
@@ -184,6 +202,8 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
           if (input) input.onmessage = handleInput
           inputRef.current = input
           conn.send({ t: 'welcome', guestRole: guestRoleRef.current } satisfies HostMessage)
+          conn.send({ t: 'sync', ...syncRef.current } satisfies HostMessage)
+          sendMap(conn)
           const current = streamRef.current
           if (!current) return
           // Separate calls keep audio and video in different sync groups, so the video isn't
@@ -213,5 +233,47 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
 
   useEffect(() => stop, [stop])
 
-  return { status, error, roomCode, stream, hasAudio, surface, rtt, start, stop }
+  const publishSync = useCallback((next: SyncState) => {
+    const prev = syncRef.current
+    if (prev.live === next.live && prev.mods === next.mods) return
+    syncRef.current = next
+    if (ctrlRef.current?.open) ctrlRef.current.send({ t: 'sync', ...next } satisfies HostMessage)
+  }, [])
+
+  const publishMap = useCallback((checksum: string, text: string) => {
+    mapRef.current = { checksum, text }
+    if (ctrlRef.current?.open) sendMap(ctrlRef.current)
+  }, [])
+
+  const publishClock = useCallback((time: number, rate: number, playing: boolean) => {
+    const input = inputRef.current
+    if (input?.readyState !== 'open' || input.bufferedAmount > 1024) return
+    input.send(encodeClock(++clockSeq.current, time, rate, playing))
+  }, [])
+
+  function sendMap(conn: DataConnection) {
+    const map = mapRef.current
+    if (!map) return
+    const n = Math.max(1, Math.ceil(map.text.length / MAP_CHUNK_CHARS))
+    for (let i = 0; i < n; i++) {
+      const d = map.text.slice(i * MAP_CHUNK_CHARS, (i + 1) * MAP_CHUNK_CHARS)
+      conn.send({ t: 'map', id: map.checksum, i, n, d } satisfies HostMessage)
+    }
+  }
+
+  return {
+    status,
+    error,
+    roomCode,
+    stream,
+    hasAudio,
+    surface,
+    rtt,
+    partner,
+    start,
+    stop,
+    publishSync,
+    publishMap,
+    publishClock,
+  }
 }

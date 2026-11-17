@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { INJECT_LAG_MS } from '@/lib/timing'
 import { Crosshair, Keyboard, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SiteHeader } from '@/components/site-header'
@@ -14,6 +15,25 @@ export function GuestRoom({ code }: { code: string }) {
   const [k1, setK1] = useState('z')
   const [k2, setK2] = useState('x')
   const connected = session.status === 'connected'
+  const [preferVideo, setPreferVideo] = useState(false)
+  const leadMsRef = useRef(0)
+  const playfieldReady = Boolean(session.map && session.sync?.live)
+  const usePlayfield = playfieldReady && !preferVideo
+  const { setMode, transitRef } = session
+
+  useEffect(() => {
+    setMode(usePlayfield ? 'playfield' : 'video')
+  }, [usePlayfield, setMode])
+
+  useEffect(() => {
+    let frame = 0
+    const tick = () => {
+      leadMsRef.current = transitRef.current + INJECT_LAG_MS
+      frame = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => cancelAnimationFrame(frame)
+  }, [transitRef])
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -65,6 +85,19 @@ export function GuestRoom({ code }: { code: string }) {
               bindings={{ k1, k2 }}
               sendAim={session.sendAim}
               sendKey={session.sendKey}
+              playfield={
+                usePlayfield && session.map
+                  ? { map: session.map, mods: session.sync?.mods ?? 0, clockRef: session.clockRef, leadMsRef }
+                  : null
+              }
+            />
+            <PlayfieldStatus
+              ready={playfieldReady}
+              loading={session.mapLoading}
+              title={session.map?.title ?? null}
+              preferVideo={preferVideo}
+              onToggle={() => setPreferVideo((v) => !v)}
+              videoLatency={session.videoLatency}
             />
           </>
         ) : (
@@ -76,6 +109,45 @@ export function GuestRoom({ code }: { code: string }) {
           />
         )}
       </main>
+    </div>
+  )
+}
+
+function PlayfieldStatus({
+  ready,
+  loading,
+  title,
+  preferVideo,
+  onToggle,
+  videoLatency,
+}: {
+  ready: boolean
+  loading: boolean
+  title: string | null
+  preferVideo: boolean
+  onToggle: () => void
+  videoLatency: number | null
+}) {
+  const local = ready && !preferVideo
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-medium">
+          {local ? 'Local map playback' : loading ? 'Receiving map…' : 'Following the stream'}
+        </span>
+        <span className="truncate text-xs text-muted-foreground">
+          {local
+            ? `${title ?? 'Current map'} is drawn on your screen, timed ahead so your input lands on beat.`
+            : ready
+              ? 'Switch back to local playback to remove the stream delay.'
+              : `Waiting for the host to start a map with tosu running.${videoLatency !== null ? ` Stream delay ${videoLatency} ms.` : ''}`}
+        </span>
+      </div>
+      {ready && (
+        <Button variant="outline" size="sm" onClick={onToggle}>
+          {preferVideo ? 'Use local playback' : 'Use stream only'}
+        </Button>
+      )}
     </div>
   )
 }

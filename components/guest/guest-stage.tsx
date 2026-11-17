@@ -1,6 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
+import type { Beatmap } from '@/lib/beatmap'
+import type { SyncClock } from '@/lib/sync-clock'
+import { Playfield } from './playfield'
 import { Maximize, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KeyLights } from '@/components/key-lights'
@@ -26,18 +29,27 @@ function videoContentRect(video: HTMLVideoElement) {
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 
+export type PlayfieldProps = {
+  map: Beatmap
+  mods: number
+  clockRef: RefObject<SyncClock>
+  leadMsRef: RefObject<number>
+}
+
 export function GuestStage({
   stream,
   role,
   bindings,
   sendAim,
   sendKey,
+  playfield,
 }: {
   stream: MediaStream | null
   role: Role
   bindings: { k1: string; k2: string }
   sendAim: (x: number, y: number) => void
   sendKey: (k: TapSlot, down: boolean) => void
+  playfield: PlayfieldProps | null
 }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -154,7 +166,13 @@ export function GuestStage({
           role === 'aim' ? 'cursor-crosshair' : 'cursor-default',
         )}
       >
-        <video ref={videoRef} autoPlay playsInline className="absolute inset-0 size-full object-contain" />
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-35')}
+        />
+        {playfield && <Playfield {...playfield} videoRef={videoRef} />}
         {!stream && <p className="relative text-sm text-muted-foreground">Waiting for the host’s video…</p>}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
