@@ -24,6 +24,7 @@ const settings = loadSettings()
 const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
+$('build-id').textContent = `build ${__BUILD_ID__}`
 const coop = window.coop
 
 let screens: ScreenSource[] = []

@@ -1,10 +1,24 @@
 import { cp, mkdir, rm } from 'node:fs/promises'
+import { execSync } from 'node:child_process'
 import { build } from 'esbuild'
 
 await rm('dist', { recursive: true, force: true })
 await mkdir('dist')
 
-const common = { bundle: true, sourcemap: true, target: 'es2022', tsconfig: 'tsconfig.json', logLevel: 'info' }
+let commit = 'local'
+try {
+  commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+} catch {}
+const buildId = `${commit} · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`
+
+const common = {
+  bundle: true,
+  sourcemap: true,
+  target: 'es2022',
+  tsconfig: 'tsconfig.json',
+  logLevel: 'info',
+  define: { __BUILD_ID__: JSON.stringify(buildId) },
+}
 
 await Promise.all([
   build({

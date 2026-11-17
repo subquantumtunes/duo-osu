@@ -196,10 +196,21 @@ export class HostSession {
 
     peer.on('open', () => {
       this.roomCode = code
+      if (this.ctrl?.open) {
+        if (!this.videoCall) {
+          this.videoRecalls = 0
+          this.callVideo(false)
+        }
+        return
+      }
       this.setStatus('waiting')
     })
     peer.on('error', (err) => {
       if (err.type === 'peer-unavailable') return
+      if (this.ctrl?.open && (err.type === 'disconnected' || err.type === 'network' || err.type === 'server-error')) {
+        this.videoNote = `signaling ${err.type}, retrying`
+        return
+      }
       this.error = `Connection error: ${err.type}`
       this.setStatus('error')
     })
@@ -291,10 +302,19 @@ export class HostSession {
     this.clearVideoRecall()
     this.dropVideoCall()
     const codec = tuned && this.quality.codec === 'h264' ? 'H264' : null
-    const call = peer.call(this.guestId, new MediaStream(tracks), {
+    // PeerJS returns undefined instead of a call while the host is cut off from the signaling
+    // server, even though the existing data link to the partner keeps working.
+    const call: MediaConnection | undefined = peer.call(this.guestId, new MediaStream(tracks), {
       sdpTransform: (sdp: string) => (codec ? preferCodec(sdp, codec) : sdp),
     })
+    if (!call) {
+      this.videoNote = peer.disconnected ? 'signaling server offline, retrying' : 'call could not start'
+      console.warn('[osu-coop] video call not created:', this.videoNote)
+      this.scheduleVideoRecall()
+      return
+    }
     this.videoCall = call
+    this.videoNote = 'negotiating'
     this.videoIce = null
     this.lastEncode = { frames: 0, seconds: 0 }
 
@@ -310,7 +330,9 @@ export class HostSession {
     call.on('close', () => {
       if (this.videoCall !== call) return
       this.videoCall = null
-      this.videoNote ??= `closed, ICE ${this.videoIce ?? 'never started'}`
+      if (!this.videoNote || this.videoNote === 'negotiating') {
+        this.videoNote = `closed, ICE ${this.videoIce ?? 'never started'}`
+      }
       console.warn('[osu-coop] video call closed:', this.videoNote)
       this.scheduleVideoRecall()
     })
@@ -334,7 +356,11 @@ export class HostSession {
   }
 
   private scheduleVideoRecall() {
-    if (this.videoRecallTimer || !this.ctrl?.open || this.videoRecalls >= VIDEO_RECALL_LIMIT) return
+    if (this.videoRecallTimer || !this.ctrl?.open) return
+    if (this.videoRecalls >= VIDEO_RECALL_LIMIT) {
+      this.videoNote = `${this.videoNote ?? 'no call'}; gave up after ${VIDEO_RECALL_LIMIT} tries`
+      return
+    }
     this.videoRecalls++
     this.videoRecallTimer = setTimeout(() => {
       this.videoRecallTimer = null
@@ -418,6 +444,7 @@ export class HostSession {
         const now = performance.now()
         if (now - this.lastRetry < RETRY_COOLDOWN_MS) return
         this.lastRetry = now
+        this.videoRecalls = 0
         this.callVideo(false)
         break
       }
@@ -471,7 +498,7 @@ export class HostSession {
       hardware: null,
       limitation: null,
       link: pc?.connectionState ?? 'none',
-      linkNote: this.videoNote,
+      linkNote: this.videoNote ?? (this.videoCall ? null : 'no call started'),
       captureFps: null,
       framesEncoded: 0,
       track: !track ? 'none' : track.readyState === 'ended' ? 'ended' : track.muted ? 'muted' : 'live',
