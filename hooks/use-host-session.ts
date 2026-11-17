@@ -28,6 +28,74 @@ type Handlers = {
   onRelease: () => void
 }
 
+const PREFERRED_SHARE = {
+  video: { frameRate: { ideal: 60, max: 60 }, displaySurface: 'monitor' },
+  audio: true,
+  systemAudio: 'include',
+  selfBrowserSurface: 'exclude',
+  surfaceSwitching: 'include',
+} as DisplayMediaStreamOptions
+
+function errorName(err: unknown) {
+  return err instanceof Error ? err.name : ''
+}
+
+function isUserCancel(err: unknown) {
+  if (errorName(err) !== 'NotAllowedError') return false
+  const message = err instanceof Error ? err.message.toLowerCase() : ''
+  return !message.includes('system') && !message.includes('policy')
+}
+
+// Some browsers reject the extended capture hints, or fail when the chosen
+// surface has no capturable audio. Those failures happen before or instead of
+// the picker, so retrying with plainer options is safe; a user cancel is not retried.
+async function requestScreenShare(): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new DOMException('getDisplayMedia unavailable', 'NotSupportedError')
+  }
+  const attempts: DisplayMediaStreamOptions[] = [
+    PREFERRED_SHARE,
+    { video: { frameRate: { ideal: 60 } }, audio: true },
+    { video: true },
+  ]
+  let lastError: unknown
+  for (const options of attempts) {
+    try {
+      return await navigator.mediaDevices.getDisplayMedia(options)
+    } catch (err) {
+      lastError = err
+      if (isUserCancel(err)) throw err
+      const name = errorName(err)
+      if (name !== 'TypeError' && name !== 'OverconstrainedError' && name !== 'NotReadableError' && name !== 'AbortError') {
+        throw err
+      }
+    }
+  }
+  throw lastError
+}
+
+function describeShareError(err: unknown) {
+  const name = errorName(err)
+  const message = err instanceof Error ? err.message.toLowerCase() : ''
+  const inFrame = typeof window !== 'undefined' && window.self !== window.top
+  if (name === 'NotSupportedError' || !window.isSecureContext) {
+    return 'This browser can’t share your screen here. Use the latest Chrome, Edge or Firefox on a desktop, and open the site over https.'
+  }
+  if (name === 'NotAllowedError') {
+    if (message.includes('system')) {
+      return 'Your operating system blocked screen capture. Allow screen recording for your browser in system privacy settings, then restart the browser.'
+    }
+    if (inFrame || message.includes('policy')) {
+      return 'Screen sharing is blocked inside this embedded view. Open the site in its own browser tab and try again.'
+    }
+    return 'Screen sharing was cancelled. Click Start sharing, choose your screen in the picker, then click Share.'
+  }
+  if (name === 'NotReadableError' || name === 'AbortError') {
+    return 'The browser couldn’t capture that screen. Close other apps that are recording the screen, or try sharing a different screen.'
+  }
+  return `Screen sharing failed${name ? ` (${name})` : ''}. Try again in a fresh Chrome or Edge tab.`
+}
+
 export function useHostSession(guestRole: Role, handlers: Handlers) {
   const [status, setStatus] = useState<HostStatus>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -152,16 +220,11 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     setStatus('starting')
     let media: MediaStream
     try {
-      media = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 60, max: 60 }, displaySurface: 'monitor' },
-        audio: true,
-        systemAudio: 'include',
-        selfBrowserSurface: 'exclude',
-        surfaceSwitching: 'include',
-      } as DisplayMediaStreamOptions)
-    } catch {
+      media = await requestScreenShare()
+    } catch (err) {
+      console.error('[osu-coop] getDisplayMedia failed:', err)
       setStatus('idle')
-      setError('Screen sharing was cancelled or blocked.')
+      setError(describeShareError(err))
       return
     }
 
