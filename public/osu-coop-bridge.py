@@ -111,7 +111,25 @@ class Injector:
         rx, ry, rw, rh = self.region
         x = min(max(float(x), 0.0), 1.0)
         y = min(max(float(y), 0.0), 1.0)
-        self.mouse.position = (int(rx + x * (rw - 1)), int(ry + y * (rh - 1)))
+        px, py = int(rx + x * (rw - 1)), int(ry + y * (rh - 1))
+        if sys.platform == "win32":
+            import ctypes
+
+            # osu! with Raw input enabled ignores plain cursor moves; an absolute
+            # input event reaches it the way a tablet does.
+            user32 = ctypes.windll.user32
+            vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+            vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+            if vw > 1 and vh > 1:
+                user32.mouse_event(
+                    0x0001 | 0x4000 | 0x8000,
+                    round((px - vx) * 65535 / (vw - 1)),
+                    round((py - vy) * 65535 / (vh - 1)),
+                    0,
+                    0,
+                )
+                return
+        self.mouse.position = (px, py)
 
     def key(self, slot, down):
         binding = self.bindings.get(slot)

@@ -83,19 +83,20 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     handlersRef.current.onKey(slot, down)
   }, [])
 
+  const applyAim = useCallback((s: number, x: number, y: number) => {
+    if (guestRoleRef.current !== 'aim' || s <= lastAimSeq.current) return
+    lastAimSeq.current = s
+    handlersRef.current.onAim(Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)))
+  }, [])
+
   const handleInput = useCallback(
     (event: MessageEvent) => {
       const packet = decodeInput(event.data)
       if (!packet) return
-      if (packet.t === 'aim') {
-        if (guestRoleRef.current !== 'aim' || packet.s <= lastAimSeq.current) return
-        lastAimSeq.current = packet.s
-        handlersRef.current.onAim(packet.x, packet.y)
-      } else if (packet.t === 'key') {
-        applyKey(packet.n, packet.k, packet.down)
-      }
+      if (packet.t === 'aim') applyAim(packet.s, packet.x, packet.y)
+      else if (packet.t === 'key') applyKey(packet.n, packet.k, packet.down)
     },
-    [applyKey],
+    [applyAim, applyKey],
   )
 
   const handleMessage = useCallback((raw: unknown) => {
@@ -105,6 +106,10 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
       case 'key':
         if ((msg.k !== 'k1' && msg.k !== 'k2') || typeof msg.n !== 'number') return
         applyKey(msg.n, msg.k, Boolean(msg.down))
+        break
+      case 'aim':
+        if (typeof msg.s !== 'number' || typeof msg.x !== 'number' || typeof msg.y !== 'number') return
+        applyAim(msg.s, msg.x, msg.y)
         break
       case 'release':
         handlersRef.current.onRelease()
@@ -121,7 +126,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         }
         break
     }
-  }, [applyKey])
+  }, [applyAim, applyKey])
 
   const stop = useCallback(() => {
     handlersRef.current.onRelease()

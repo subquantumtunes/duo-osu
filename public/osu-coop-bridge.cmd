@@ -197,7 +197,11 @@ namespace OsuCoop
 
     static class Native
     {
+        public const uint INPUT_MOUSE = 0;
         public const uint INPUT_KEYBOARD = 1;
+        public const uint MOUSEEVENTF_MOVE = 0x1;
+        public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+        public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
         public const uint KEYEVENTF_EXTENDEDKEY = 0x1;
         public const uint KEYEVENTF_KEYUP = 0x2;
         public const uint KEYEVENTF_SCANCODE = 0x8;
@@ -298,13 +302,40 @@ namespace OsuCoop
             throw new ArgumentException("Unknown key: " + name);
         }
 
+        bool announcedAim;
+
+        // osu! with Raw input enabled ignores SetCursorPos; an absolute SendInput move reaches it
+        // like a tablet would, and works with Raw input off too.
         public void Aim(double x, double y)
         {
             Native.MakeThreadDpiAware();
             if (double.IsNaN(x) || double.IsNaN(y)) return;
             x = Math.Min(Math.Max(x, 0.0), 1.0);
             y = Math.Min(Math.Max(y, 0.0), 1.0);
-            Native.SetCursorPos((int)(rx + x * (rw - 1)), (int)(ry + y * (rh - 1)));
+            int px = (int)(rx + x * (rw - 1));
+            int py = (int)(ry + y * (rh - 1));
+            if (!announcedAim)
+            {
+                announcedAim = true;
+                Console.WriteLine("Partner cursor input received.");
+            }
+
+            int vx = Native.GetSystemMetrics(76), vy = Native.GetSystemMetrics(77);
+            int vw = Native.GetSystemMetrics(78), vh = Native.GetSystemMetrics(79);
+            if (vw > 1 && vh > 1)
+            {
+                Native.INPUT input = new Native.INPUT();
+                input.type = Native.INPUT_MOUSE;
+                input.u.mi.dx = (int)Math.Round((px - vx) * 65535.0 / (vw - 1));
+                input.u.mi.dy = (int)Math.Round((py - vy) * 65535.0 / (vh - 1));
+                input.u.mi.dwFlags = Native.MOUSEEVENTF_MOVE | Native.MOUSEEVENTF_ABSOLUTE | Native.MOUSEEVENTF_VIRTUALDESK;
+                if (Native.SendInput(1, new Native.INPUT[] { input }, Marshal.SizeOf(typeof(Native.INPUT))) == 1) return;
+            }
+            if (!Native.SetCursorPos(px, py) && !warnedFailure)
+            {
+                warnedFailure = true;
+                Console.WriteLine("Windows blocked the cursor move. If osu! runs as administrator, run this bridge as administrator too.");
+            }
         }
 
         public void Key(int slot, bool down)

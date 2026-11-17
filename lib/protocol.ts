@@ -3,6 +3,7 @@ export type TapSlot = 'k1' | 'k2'
 
 export type GuestMessage =
   | { t: 'key'; k: TapSlot; down: boolean; n: number }
+  | { t: 'aim'; s: number; x: number; y: number }
   | { t: 'release' }
   | { t: 'ping'; ts: number; rtt?: number; video?: number | null; mode?: 'playfield' | 'video' }
 
@@ -139,11 +140,18 @@ export async function tuneScreenSenders(pc: RTCPeerConnection | undefined) {
     if (sender.track?.kind !== 'video') continue
     const params = sender.getParameters()
     if (!params.encodings?.length) continue
-    params.encodings[0].maxBitrate = 10_000_000
-    params.encodings[0].maxFramerate = 60
-    // Encoding above 1080p adds noticeable per-frame latency on most machines.
+    const encoding = params.encodings[0] as RTCRtpEncodingParameters & {
+      priority?: string
+      networkPriority?: string
+    }
+    encoding.maxBitrate = 8_000_000
+    encoding.maxFramerate = 60
+    encoding.priority = 'high'
+    encoding.networkPriority = 'high'
+    // Each frame encodes, sends and decodes noticeably faster at 720p than at 1080p+, and the
+    // circles stay easy to read.
     const height = sender.track.getSettings().height ?? 0
-    params.encodings[0].scaleResolutionDownBy = height > 1080 ? height / 1080 : 1
+    encoding.scaleResolutionDownBy = height > 720 ? height / 720 : 1
     ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
       'maintain-framerate'
     try {

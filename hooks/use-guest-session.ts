@@ -51,6 +51,7 @@ export type GuestStatus = 'idle' | 'connecting' | 'connected' | 'ended' | 'error
 
 // Past this much queued data the link is congested; newer cursor packets supersede older ones.
 const MAX_AIM_BUFFER = 256
+const FALLBACK_AIM_MS = 8
 
 export function useGuestSession(code: string) {
   const [status, setStatus] = useState<GuestStatus>('idle')
@@ -75,6 +76,7 @@ export function useGuestSession(code: string) {
   const inputRef = useRef<RTCDataChannel | null>(null)
   const tracksRef = useRef<MediaStreamTrack[]>([])
   const aimSeq = useRef(0)
+  const lastFallbackAim = useRef(0)
   const keySeq = useRef(0)
   const rttRef = useRef<number | undefined>(undefined)
 
@@ -237,8 +239,16 @@ export function useGuestSession(code: string) {
 
   const sendAim = useCallback((x: number, y: number) => {
     const input = inputRef.current
-    if (input?.readyState !== 'open' || input.bufferedAmount > MAX_AIM_BUFFER) return
-    input.send(encodeAim(++aimSeq.current, x, y))
+    if (input?.readyState === 'open') {
+      if (input.bufferedAmount <= MAX_AIM_BUFFER) input.send(encodeAim(++aimSeq.current, x, y))
+      return
+    }
+    // Without the fast channel, fall back to the reliable one at a rate it can keep up with.
+    const ctrl = ctrlRef.current
+    const now = performance.now()
+    if (!ctrl?.open || now - lastFallbackAim.current < FALLBACK_AIM_MS) return
+    lastFallbackAim.current = now
+    ctrl.send({ t: 'aim', s: ++aimSeq.current, x, y } satisfies GuestMessage)
   }, [])
 
   // Each key event goes out on the fast lossy channel and the reliable one; the host applies
