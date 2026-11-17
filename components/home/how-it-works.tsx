@@ -1,7 +1,7 @@
 const STEPS = [
   {
     title: 'Host shares the game',
-    body: 'The host shares their whole monitor (with system audio) from Chrome or Edge. Video goes directly to the partner over WebRTC — no server in the middle.',
+    body: 'The host shares their whole monitor (with system audio) from Chrome, Edge or Opera (including Opera GX). Video goes directly to the partner over WebRTC — no server in the middle.',
   },
   {
     title: 'Bridge injects input',

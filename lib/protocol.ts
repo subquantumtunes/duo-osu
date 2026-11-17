@@ -5,11 +5,23 @@ export type GuestMessage =
   | { t: 'key'; k: TapSlot; down: boolean; n: number }
   | { t: 'aim'; s: number; x: number; y: number }
   | { t: 'release' }
-  | { t: 'ping'; ts: number; rtt?: number; video?: number | null; mode?: 'playfield' | 'video' }
+  | { t: 'video-retry' }
+  | {
+      t: 'ping'
+      ts: number
+      rtt?: number
+      video?: number | null
+      mode?: 'playfield' | 'video'
+      vs?: VideoIssue | 'ok'
+    }
+
+/** Why the partner sees no picture. */
+export type VideoIssue = 'connecting' | 'network' | 'host-capture' | 'decode'
 
 export type HostMessage =
   | { t: 'welcome'; guestRole: Role }
   | { t: 'pong'; ts: number }
+  | { t: 'host-video'; frames: number; live: boolean }
   | { t: 'full' }
   | { t: 'input-ok' }
   | { t: 'sync'; live: boolean; mods: number }

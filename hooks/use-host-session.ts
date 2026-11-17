@@ -16,6 +16,20 @@ import {
   tuneScreenSenders,
 } from '@/lib/protocol'
 import type { PartnerStats } from '@/lib/timing'
+import { ICE_SERVERS, SUPPORTED_BROWSERS, detectBrowser, isOpera } from '@/lib/browser'
+
+const VIDEO_STATES = ['ok', 'connecting', 'network', 'host-capture', 'decode'] as const
+const RETRY_COOLDOWN_MS = 3000
+
+async function readEncodedFrames(pc: RTCPeerConnection | undefined) {
+  if (!pc) return 0
+  let frames = 0
+  const report = await pc.getStats()
+  report.forEach((s) => {
+    if (s.type === 'outbound-rtp' && s.kind === 'video') frames += s.framesEncoded ?? 0
+  })
+  return frames
+}
 
 type SyncState = { live: boolean; mods: number }
 type MapFile = { checksum: string; text: string }
@@ -78,12 +92,16 @@ function describeShareError(err: unknown) {
   const name = errorName(err)
   const message = err instanceof Error ? err.message.toLowerCase() : ''
   const inFrame = typeof window !== 'undefined' && window.self !== window.top
+  const opera = isOpera(detectBrowser())
   if (name === 'NotSupportedError' || !window.isSecureContext) {
-    return 'This browser can’t share your screen here. Use the latest Chrome, Edge or Firefox on a desktop, and open the site over https.'
+    return `This browser can’t share your screen here. Use the latest ${SUPPORTED_BROWSERS} on a desktop, and open the site over https.`
   }
   if (name === 'NotAllowedError') {
     if (message.includes('system')) {
       return 'Your operating system blocked screen capture. Allow screen recording for your browser in system privacy settings, then restart the browser.'
+    }
+    if (opera && !inFrame && !message.includes('policy')) {
+      return 'Screen sharing was cancelled or blocked. In Opera, click the site icon left of the address bar and set Screen sharing to Allow, then click Start sharing, pick your screen and click Share.'
     }
     if (inFrame || message.includes('policy')) {
       return 'Screen sharing is blocked inside this embedded view. Open the site in its own browser tab and try again.'
@@ -93,7 +111,7 @@ function describeShareError(err: unknown) {
   if (name === 'NotReadableError' || name === 'AbortError') {
     return 'The browser couldn’t capture that screen. Close other apps that are recording the screen, or try sharing a different screen.'
   }
-  return `Screen sharing failed${name ? ` (${name})` : ''}. Try again in a fresh Chrome or Edge tab.`
+  return `Screen sharing failed${name ? ` (${name})` : ''}. Try again in a fresh ${opera ? 'Opera' : 'Chrome or Edge'} tab.`
 }
 
 export function useHostSession(guestRole: Role, handlers: Handlers) {
@@ -112,6 +130,8 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
   const peerRef = useRef<Peer | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const callsRef = useRef<MediaConnection[]>([])
+  const videoCallRef = useRef<MediaConnection | null>(null)
+  const lastRetry = useRef(0)
   const guestIdRef = useRef<string | null>(null)
   const ctrlRef = useRef<DataConnection | null>(null)
   const inputRef = useRef<RTCDataChannel | null>(null)
@@ -125,9 +145,28 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     handlersRef.current = handlers
   })
 
+  // The video goes on its own call so it can be re-sent on request. A retry skips the encoder
+  // tuning, in case a GPU encoder rejects the tuned parameters and sends nothing.
+  const callVideo = useCallback((tuned: boolean) => {
+    const peer = peerRef.current
+    const guest = guestIdRef.current
+    const tracks = streamRef.current?.getVideoTracks().filter((t) => t.readyState === 'live') ?? []
+    if (!peer || peer.destroyed || !guest || tracks.length === 0) return
+    videoCallRef.current?.close()
+    const call = peer.call(guest, new MediaStream(tracks))
+    videoCallRef.current = call
+    const pc = call.peerConnection
+    if (!tuned || !pc) return
+    pc.addEventListener('connectionstatechange', () => {
+      if (pc.connectionState === 'connected') void tuneScreenSenders(pc)
+    })
+  }, [])
+
   const closeLink = useCallback(() => {
     callsRef.current.forEach((call) => call.close())
     callsRef.current = []
+    videoCallRef.current?.close()
+    videoCallRef.current = null
     inputRef.current?.close()
     inputRef.current = null
     ctrlRef.current = null
@@ -188,19 +227,35 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
       case 'release':
         handlersRef.current.onRelease()
         break
-      case 'ping':
-        ctrlRef.current?.send({ t: 'pong', ts: msg.ts } satisfies HostMessage)
-        if (typeof msg.rtt === 'number') {
-          setRtt(msg.rtt)
-          setPartner({
-            rtt: msg.rtt,
-            video: typeof msg.video === 'number' ? msg.video : null,
-            mode: msg.mode === 'playfield' ? 'playfield' : 'video',
-          })
-        }
+      case 'video-retry': {
+        const now = performance.now()
+        if (now - lastRetry.current < RETRY_COOLDOWN_MS) return
+        lastRetry.current = now
+        callVideo(false)
         break
+      }
+      case 'ping': {
+        const ctrl = ctrlRef.current
+        ctrl?.send({ t: 'pong', ts: msg.ts } satisfies HostMessage)
+        void readEncodedFrames(videoCallRef.current?.peerConnection)
+          .then((frames) => {
+            if (!ctrl?.open) return
+            const live = streamRef.current?.getVideoTracks()[0]?.readyState === 'live'
+            ctrl.send({ t: 'host-video', frames, live } satisfies HostMessage)
+          })
+          .catch(() => {})
+        const videoState = VIDEO_STATES.find((s) => s === msg.vs) ?? 'ok'
+        setPartner((prev) => ({
+          rtt: typeof msg.rtt === 'number' ? msg.rtt : (prev?.rtt ?? 0),
+          video: typeof msg.video === 'number' ? msg.video : null,
+          mode: msg.mode === 'playfield' ? 'playfield' : 'video',
+          videoState,
+        }))
+        if (typeof msg.rtt === 'number') setRtt(msg.rtt)
+        break
+      }
     }
-  }, [applyAim, applyKey])
+  }, [applyAim, applyKey, callVideo])
 
   const stop = useCallback(() => {
     handlersRef.current.onRelease()
@@ -240,7 +295,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
 
     const code = makeRoomCode()
     const { Peer } = await import('peerjs')
-    const peer = new Peer(ROOM_PREFIX + code, { debug: 1 })
+    const peer = new Peer(ROOM_PREFIX + code, { debug: 1, config: { iceServers: ICE_SERVERS } })
     peerRef.current = peer
 
     peer.on('open', () => {
@@ -282,22 +337,16 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
           if (!current) return
           // Separate calls keep audio and video in different sync groups, so the video isn't
           // delayed to line up with the audio jitter buffer.
-          const groups = [current.getVideoTracks(), current.getAudioTracks()].filter((g) => g.length > 0)
-          callsRef.current = groups.map((tracks) => {
-            const call = peer.call(conn.peer, new MediaStream(tracks))
-            const pc = call.peerConnection
-            pc?.addEventListener('connectionstatechange', () => {
-              if (pc.connectionState === 'connected') void tuneScreenSenders(pc)
-            })
-            return call
-          })
+          callVideo(true)
+          const audio = current.getAudioTracks()
+          callsRef.current = audio.length > 0 ? [peer.call(conn.peer, new MediaStream(audio))] : []
           setStatus('connected')
         })
         conn.on('close', dropGuest)
         conn.on('error', dropGuest)
       }
     })
-  }, [dropGuest, handleInput, handleMessage, stop])
+  }, [callVideo, dropGuest, handleInput, handleMessage, stop])
 
   useEffect(() => {
     guestRoleRef.current = guestRole

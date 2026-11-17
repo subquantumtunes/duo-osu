@@ -7,8 +7,9 @@ import { Playfield } from './playfield'
 import { Maximize, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KeyLights } from '@/components/key-lights'
-import type { Role, TapSlot } from '@/lib/protocol'
+import type { Role, TapSlot, VideoIssue } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
+import { VideoIssueOverlay } from './video-issue'
 
 type Source = 'keyboard' | 'mouse'
 
@@ -43,7 +44,11 @@ export function GuestStage({
   sendAim,
   sendKey,
   playfield,
+  videoIssue,
+  onRetryVideo,
 }: {
+  videoIssue: VideoIssue | null
+  onRetryVideo: () => void
   stream: MediaStream | null
   role: Role
   bindings: { k1: string; k2: string }
@@ -62,12 +67,25 @@ export function GuestStage({
     if (!video) return
     video.srcObject = stream
     if (!stream) return
+    // Remote tracks start muted until their first frame; nudge playback when frames begin
+    // so the element doesn't sit paused on a black frame.
+    const play = () => {
+      if (!video.paused) return
+      video.play().catch(() => {
+        video.muted = true
+        setNeedsUnmute(true)
+        video.play().catch(() => {})
+      })
+    }
     video.muted = false
-    video.play().catch(() => {
-      video.muted = true
-      setNeedsUnmute(true)
-      video.play().catch(() => {})
-    })
+    play()
+    const tracks = stream.getVideoTracks()
+    tracks.forEach((t) => t.addEventListener('unmute', play))
+    video.addEventListener('loadedmetadata', play)
+    return () => {
+      tracks.forEach((t) => t.removeEventListener('unmute', play))
+      video.removeEventListener('loadedmetadata', play)
+    }
   }, [stream])
 
   const press = useCallback(
@@ -173,7 +191,16 @@ export function GuestStage({
           className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-35')}
         />
         {playfield && <Playfield {...playfield} videoRef={videoRef} />}
-        {!stream && <p className="relative text-sm text-muted-foreground">Waiting for the host’s video…</p>}
+        {!playfield && videoIssue && videoIssue !== 'connecting' ? (
+          <VideoIssueOverlay issue={videoIssue} onRetry={onRetryVideo} />
+        ) : (
+          !playfield &&
+          videoIssue === 'connecting' && (
+            <p className="relative text-sm text-muted-foreground" role="status">
+              Connecting to the host’s video…
+            </p>
+          )
+        )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         {role === 'tap' ? (

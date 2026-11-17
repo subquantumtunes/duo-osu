@@ -51,10 +51,15 @@ function UnreachableHelp() {
             copied the latest pairing code (it changes each time the bridge starts).
           </li>
           <li>
-            If Chrome or Edge asked to access devices on your local network and you blocked it, click the icon at the
-            left of the address bar, allow <span className="text-foreground">Local network access</span>, and reload.
+            If Chrome, Edge or Opera asked to access devices on your local network and you blocked it, click the icon
+            at the left of the address bar, allow <span className="text-foreground">Local network access</span>, and
+            reload.
           </li>
-          <li>Safari blocks this connection. Use Chrome, Edge, or Firefox on the host PC.</li>
+          <li>
+            In Opera, turn off the built-in VPN for this site. It routes the page through a proxy that can’t reach the
+            bridge on your PC.
+          </li>
+          <li>Safari blocks this connection. Use Chrome, Edge, Opera or Firefox on the host PC.</li>
           <li>Run the bridge on the same computer as this browser.</li>
         </ul>
       )}

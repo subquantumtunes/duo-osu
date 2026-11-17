@@ -88,6 +88,7 @@ export function HostRoom() {
           keys={keys}
           bindings={bindings}
           guestRole={guestRole}
+          partnerVideo={session.status === 'connected' ? (session.partner?.videoState ?? null) : null}
         />
         <aside className="flex flex-col gap-4" aria-label="Session setup">
           <RolePanel guestRole={guestRole} onChange={setGuestRole} k1={k1} k2={k2} onK1={setK1} onK2={setK2} />

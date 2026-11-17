@@ -14,7 +14,9 @@ import {
   encodeProbe,
   minimizePlayoutDelay,
   openInputChannel,
+  type VideoIssue,
 } from '@/lib/protocol'
+import { ICE_SERVERS } from '@/lib/browser'
 import { type Beatmap, parseBeatmap } from '@/lib/beatmap'
 import { SyncClock } from '@/lib/sync-clock'
 import { type PartnerMode, SOURCE_LAG_MS } from '@/lib/timing'
@@ -28,8 +30,10 @@ async function readVideoStats(pc: RTCPeerConnection | null, prev: VideoStatsSamp
   if (!pc) return null
   const report = await pc.getStats()
   let current: VideoStatsSample | null = null
+  let bytes = 0
   report.forEach((s) => {
     if (s.type === 'inbound-rtp' && s.kind === 'video') {
+      bytes = s.bytesReceived ?? 0
       current = {
         jitter: s.jitterBufferDelay ?? 0,
         emitted: s.jitterBufferEmittedCount ?? 0,
@@ -38,14 +42,33 @@ async function readVideoStats(pc: RTCPeerConnection | null, prev: VideoStatsSamp
       }
     }
   })
-  if (!current) return null
+  if (!current) return { sample: null, receiveMs: null, frames: 0, bytes: 0 }
   const now: VideoStatsSample = current
   const base = prev ?? { jitter: 0, emitted: 0, decode: 0, frames: 0 }
   const emitted = now.emitted - base.emitted
   const frames = now.frames - base.frames
   const bufferMs = emitted > 0 ? ((now.jitter - base.jitter) / emitted) * 1000 : 0
   const decodeMs = frames > 0 ? ((now.decode - base.decode) / frames) * 1000 : 0
-  return { sample: now, receiveMs: bufferMs + decodeMs }
+  return { sample: now, receiveMs: frames > 0 ? bufferMs + decodeMs : null, frames: now.frames, bytes }
+}
+
+// How long a fresh video call gets to show its first frame before it's treated as stuck.
+const FIRST_FRAME_MS = 6000
+const AUTO_RETRIES = 2
+
+function diagnose(
+  pc: RTCPeerConnection | null,
+  frames: number,
+  bytes: number,
+  host: { frames: number; live: boolean } | null,
+  waitedMs: number,
+): VideoIssue | null {
+  if (frames > 0 && pc?.connectionState !== 'failed') return null
+  if (pc?.connectionState === 'failed') return 'network'
+  if (waitedMs < FIRST_FRAME_MS) return 'connecting'
+  if (!pc || pc.connectionState !== 'connected') return 'network'
+  if (host && (!host.live || host.frames === 0)) return 'host-capture'
+  return bytes > 0 ? 'decode' : 'network'
 }
 
 export type GuestStatus = 'idle' | 'connecting' | 'connected' | 'ended' | 'error'
@@ -64,6 +87,11 @@ export function useGuestSession(code: string) {
   const [map, setMap] = useState<Beatmap | null>(null)
   const [mapLoading, setMapLoading] = useState(false)
   const [videoLatency, setVideoLatency] = useState<number | null>(null)
+  const [videoIssue, setVideoIssue] = useState<VideoIssue | null>('connecting')
+  const videoIssueRef = useRef<VideoIssue | null>('connecting')
+  const videoSinceRef = useRef(0)
+  const retriesRef = useRef(0)
+  const hostVideoRef = useRef<{ frames: number; live: boolean } | null>(null)
 
   const clockRef = useRef(new SyncClock())
   const transitRef = useRef(0)
@@ -96,6 +124,10 @@ export function useGuestSession(code: string) {
     chunksRef.current = null
     videoPcRef.current = null
     videoStatsRef.current = null
+    hostVideoRef.current = null
+    retriesRef.current = 0
+    videoIssueRef.current = 'connecting'
+    setVideoIssue('connecting')
   }
 
   const receiveMapChunk = (msg: Extract<HostMessage, { t: 'map' }>) => {
@@ -128,7 +160,7 @@ export function useGuestSession(code: string) {
     setError(null)
     setStatus('connecting')
     const { Peer } = await import('peerjs')
-    const peer = new Peer({ debug: 1 })
+    const peer = new Peer({ debug: 1, config: { iceServers: ICE_SERVERS } })
     peerRef.current = peer
     const hostId = ROOM_PREFIX + code
 
@@ -167,8 +199,11 @@ export function useGuestSession(code: string) {
       ctrl.on('data', (raw) => {
         const msg = raw as HostMessage
         if (msg.t === 'welcome') {
+          if (!videoSinceRef.current) videoSinceRef.current = performance.now()
           setRole(msg.guestRole)
           setStatus('connected')
+        } else if (msg.t === 'host-video') {
+          hostVideoRef.current = { frames: msg.frames, live: msg.live }
         } else if (msg.t === 'pong') {
           const value = Math.round(performance.now() - msg.ts)
           rttRef.current = value
@@ -211,6 +246,9 @@ export function useGuestSession(code: string) {
         tracksRef.current = [...kept, ...incoming]
         setStream(new MediaStream(tracksRef.current))
       })
+      call.on('close', () => {
+        if (videoPcRef.current === call.peerConnection) videoPcRef.current = null
+      })
     })
 
     peer.on('error', (err) => {
@@ -226,24 +264,44 @@ export function useGuestSession(code: string) {
   useEffect(() => {
     if (status !== 'connected') return
     const tick = async () => {
+      const pc = videoPcRef.current
+      let frames = 0
+      let bytes = 0
       try {
-        const stats = await readVideoStats(videoPcRef.current, videoStatsRef.current)
+        const stats = await readVideoStats(pc, videoStatsRef.current)
         if (stats) {
+          frames = stats.frames
+          bytes = stats.bytes
           videoStatsRef.current = stats.sample
           const rtt = rttRef.current
-          if (rtt !== undefined) {
+          if (rtt !== undefined && stats.receiveMs !== null) {
             const latency = Math.round(rtt / 2 + stats.receiveMs + CAPTURE_ENCODE_MS)
             videoLatencyRef.current = latency
             setVideoLatency(latency)
           }
         }
       } catch {}
+
+      const now = performance.now()
+      const issue = diagnose(pc, frames, bytes, hostVideoRef.current, now - videoSinceRef.current)
+      if (issue === null) retriesRef.current = 0
+      else if (issue !== 'connecting' && retriesRef.current < AUTO_RETRIES && ctrlRef.current?.open) {
+        retriesRef.current++
+        videoSinceRef.current = now
+        ctrlRef.current.send({ t: 'video-retry' } satisfies GuestMessage)
+      }
+      if (issue !== videoIssueRef.current) {
+        videoIssueRef.current = issue
+        setVideoIssue(issue)
+      }
+
       ctrlRef.current?.send({
         t: 'ping',
-        ts: performance.now(),
+        ts: now,
         rtt: rttRef.current,
         video: videoLatencyRef.current,
         mode: modeRef.current,
+        vs: issue ?? 'ok',
       } satisfies GuestMessage)
     }
     const id = setInterval(tick, 1000)
@@ -252,6 +310,16 @@ export function useGuestSession(code: string) {
 
   const setMode = useCallback((mode: PartnerMode) => {
     modeRef.current = mode
+  }, [])
+
+  const retryVideo = useCallback(() => {
+    const ctrl = ctrlRef.current
+    if (!ctrl?.open) return
+    retriesRef.current = 0
+    videoSinceRef.current = performance.now()
+    videoIssueRef.current = 'connecting'
+    setVideoIssue('connecting')
+    ctrl.send({ t: 'video-retry' } satisfies GuestMessage)
   }, [])
 
   useEffect(() => () => peerRef.current?.destroy(), [])
@@ -291,6 +359,8 @@ export function useGuestSession(code: string) {
     map,
     mapLoading,
     videoLatency,
+    videoIssue,
+    retryVideo,
     clockRef,
     transitRef,
     setMode,

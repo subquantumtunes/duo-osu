@@ -4,6 +4,16 @@ import { type RefObject, useEffect, useRef } from 'react'
 import { MonitorUp } from 'lucide-react'
 import { KeyLights } from '@/components/key-lights'
 import { ROLE_LABEL, type Role } from '@/lib/protocol'
+import type { PartnerStats } from '@/lib/timing'
+
+const PARTNER_VIDEO_TEXT: Partial<Record<PartnerStats['videoState'], string>> = {
+  network:
+    'Your partner sees a black screen: the video can’t get through. Turn off VPNs (including Opera’s built-in VPN) on both PCs. In Opera, set Settings → WebRTC to “Default public and private interfaces”.',
+  'host-capture':
+    'Your partner sees a black screen because this capture is blank. Set osu! to Borderless, keep it on the shared monitor and not minimized, then stop and restart sharing if needed.',
+  decode:
+    'Your partner’s browser receives the video but can’t display it. They should turn on hardware acceleration and restart their browser.',
+}
 
 export function HostStage({
   stream,
@@ -12,7 +22,9 @@ export function HostStage({
   keys,
   bindings,
   guestRole,
+  partnerVideo,
 }: {
+  partnerVideo: PartnerStats['videoState'] | null
   stream: MediaStream | null
   aimRef: RefObject<{ x: number; y: number } | null>
   showAim: boolean
@@ -72,6 +84,11 @@ export function HostStage({
             on so your partner’s cursor maps to the right spot.
           </p>
         </div>
+      )}
+      {partnerVideo && PARTNER_VIDEO_TEXT[partnerVideo] && (
+        <p role="alert" className="border-t border-destructive/40 bg-destructive/10 px-4 py-3 text-xs leading-relaxed">
+          {PARTNER_VIDEO_TEXT[partnerVideo]}
+        </p>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
         <p className="text-sm text-muted-foreground">

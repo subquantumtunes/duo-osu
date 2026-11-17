@@ -85,6 +85,8 @@ export function GuestRoom({ code }: { code: string }) {
               bindings={{ k1, k2 }}
               sendAim={session.sendAim}
               sendKey={session.sendKey}
+              videoIssue={session.videoIssue}
+              onRetryVideo={session.retryVideo}
               playfield={
                 usePlayfield && session.map
                   ? { map: session.map, mods: session.sync?.mods ?? 0, clockRef: session.clockRef, leadMsRef }

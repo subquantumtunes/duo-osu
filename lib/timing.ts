@@ -5,6 +5,8 @@ export type PartnerStats = {
   /** Time from a frame leaving the host's screen to it showing on the partner's screen. */
   video: number | null
   mode: PartnerMode
+  /** What the partner's video looks like: 'ok', or the reason it's blank. */
+  videoState: 'ok' | 'connecting' | 'network' | 'host-capture' | 'decode'
 }
 
 /** Host browser to bridge to injected key press. */
