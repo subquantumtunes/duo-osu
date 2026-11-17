@@ -1,13 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Download, Plug, Unplug } from 'lucide-react'
+import { Check, Copy, Download, Plug, Unplug } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
 import type { BridgeStatus } from '@/hooks/use-bridge'
 import { DEFAULT_BRIDGE_PORT } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
 import { Panel } from './panel'
+
+const BRIDGE_PATH = '/osu-coop-bridge.py'
 
 const STATUS_TEXT: Record<BridgeStatus, string> = {
   disconnected: 'Not connected',
@@ -30,6 +32,19 @@ export function BridgePanel({
 }) {
   const [token, setToken] = useState('')
   const connected = status === 'connected'
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+
+  async function copyScript() {
+    try {
+      const res = await fetch(BRIDGE_PATH)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await navigator.clipboard.writeText(await res.text())
+      setCopyState('copied')
+      setTimeout(() => setCopyState('idle'), 2000)
+    } catch {
+      setCopyState('failed')
+    }
+  }
 
   return (
     <Panel step={2} title="Run the input bridge">
@@ -45,14 +60,37 @@ export function BridgePanel({
           If your browser asks to access devices on your local network, allow it.
         </li>
       </ol>
-      <a
-        href="/osu-coop-bridge.py"
-        download
-        className={cn(buttonVariants({ variant: 'outline' }), 'w-fit')}
-      >
-        <Download aria-hidden="true" />
-        Download bridge
-      </a>
+      <div className="flex flex-wrap items-center gap-2">
+        <a
+          href={BRIDGE_PATH}
+          download="osu-coop-bridge.py"
+          target="_blank"
+          rel="noopener"
+          onClick={(e) => {
+            if (window.self !== window.top) {
+              e.preventDefault()
+              window.open(BRIDGE_PATH, '_blank', 'noopener')
+            }
+          }}
+          className={cn(buttonVariants({ variant: 'outline' }), 'w-fit')}
+        >
+          <Download aria-hidden="true" />
+          Download bridge
+        </a>
+        <Button type="button" variant="ghost" onClick={copyScript}>
+          {copyState === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          {copyState === 'copied' ? 'Copied' : 'Copy script'}
+        </Button>
+      </div>
+      {copyState === 'failed' && (
+        <p role="alert" className="text-xs text-destructive">
+          {"Couldn't copy here. Open "}
+          <a href={BRIDGE_PATH} target="_blank" rel="noopener" className="underline underline-offset-2">
+            the script
+          </a>
+          {' in a new tab and save it as osu-coop-bridge.py.'}
+        </p>
+      )}
       <form
         className="flex gap-2"
         onSubmit={(e) => {
