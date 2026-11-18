@@ -58,7 +58,11 @@ export class GameAudio {
   }
 
   start() {
-    if (!this.Ctor || this.timer) return this.status
+    if (!this.Ctor) {
+      this.onStatus(this.status)
+      return this.status
+    }
+    if (this.timer) return this.status
     this.timer = setInterval(() => void this.poll(), POLL_MS)
     void this.poll()
     return this.status

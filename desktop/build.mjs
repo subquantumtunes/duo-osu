@@ -27,7 +27,8 @@ await Promise.all([
     outfile: 'dist/main.js',
     platform: 'node',
     format: 'cjs',
-    external: ['electron', 'koffi', 'ws', 'bufferutil', 'utf-8-validate'],
+    // Native modules must stay in node_modules: bundled, `bindings` can't find their .node file.
+    external: ['electron', 'koffi', 'loopback-capture', 'bindings', 'ws', 'bufferutil', 'utf-8-validate'],
   }),
   build({
     ...common,

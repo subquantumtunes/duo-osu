@@ -60,27 +60,39 @@ export function GuestStage({
 }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   const [needsUnmute, setNeedsUnmute] = useState(false)
   const [pressed, setPressed] = useState({ k1: false, k2: false })
   const held = useRef<Record<TapSlot, Set<Source>>>({ k1: new Set(), k2: new Set() })
   const cursorRef = useRef<{ x: number; y: number } | null>(null)
 
+  // Audio plays through its own element: the video element is re-attached whenever the video
+  // call restarts, and keeping it muted means autoplay rules can never pause the picture.
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const track = stream?.getAudioTracks()[0] ?? null
+    const current = (audio.srcObject as MediaStream | null)?.getAudioTracks()[0] ?? null
+    if (track === current) return
+    audio.srcObject = track ? new MediaStream([track]) : null
+    if (!track) return
+    audio
+      .play()
+      .then(() => setNeedsUnmute(false))
+      .catch(() => setNeedsUnmute(true))
+  }, [stream])
+
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
+    video.muted = true
     video.srcObject = stream
     if (!stream) return
     // Remote tracks start muted until their first frame; nudge playback when frames begin
     // so the element doesn't sit paused on a black frame.
     const play = () => {
-      if (!video.paused) return
-      video.play().catch(() => {
-        video.muted = true
-        setNeedsUnmute(true)
-        video.play().catch(() => {})
-      })
+      if (video.paused) video.play().catch(() => {})
     }
-    video.muted = false
     play()
     const tracks = stream.getVideoTracks()
     tracks.forEach((t) => t.addEventListener('unmute', play))
@@ -198,9 +210,11 @@ export function GuestStage({
           role === 'aim' ? (playfield ? 'cursor-none' : 'cursor-crosshair') : 'cursor-default',
         )}
       >
+        <audio ref={audioRef} autoPlay />
         <video
           ref={videoRef}
           autoPlay
+          muted
           playsInline
           className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-10')}
         />
@@ -231,8 +245,10 @@ export function GuestStage({
             <Button
               variant="secondary"
               onClick={() => {
-                if (videoRef.current) videoRef.current.muted = false
-                setNeedsUnmute(false)
+                audioRef.current
+                  ?.play()
+                  .then(() => setNeedsUnmute(false))
+                  .catch(() => {})
               }}
             >
               <Volume2 aria-hidden="true" />

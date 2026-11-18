@@ -1,7 +1,7 @@
 import { clockRate } from '@/lib/beatmap'
 import type { Role, TapSlot } from '@/lib/protocol'
 import { compensatingOffset, formatMs, videoInputLag } from '@/lib/timing'
-import type { GameClient, InputStatus, OsuStatus, ScreenSource } from '../shared/api'
+import type { GameAudioStatus, GameClient, InputStatus, OsuStatus, ScreenSource } from '../shared/api'
 import { keyLabel } from '../shared/keys'
 import { HostSession, type Quality } from './session'
 
@@ -67,6 +67,12 @@ function applyOsu(next: OsuStatus) {
   session.publishSync({ live: playing, mods: next.mods })
   render()
 }
+
+let gameAudio: GameAudioStatus = { active: false, reason: null }
+coop.onGameAudioStatus((status) => {
+  gameAudio = status
+  render()
+})
 
 function setChip(id: string, text: string, tone: 'good' | 'bad' | 'idle') {
   const chip = $(id)
@@ -165,6 +171,20 @@ function render() {
     session.status === 'connected' ? `Partner ${session.rtt !== null ? `${session.rtt} ms` : 'joined'}` : 'No partner',
     session.status === 'connected' ? 'good' : 'idle',
   )
+  const sharing = session.stream !== null
+  const audioOn = sharing && session.hasAudio && gameAudio.active
+  setChip(
+    'chip-audio',
+    !sharing ? 'Game audio' : audioOn ? 'Game audio on' : 'No game audio',
+    !sharing ? 'idle' : audioOn ? 'good' : 'bad',
+  )
+  $('audio-hint').textContent = !sharing
+    ? ''
+    : !session.hasAudio
+      ? 'This build can’t create an audio track, so your partner won’t hear the game.'
+      : audioOn
+        ? 'Your partner hears osu! only. Discord and other apps stay off the stream.'
+        : (gameAudio.reason ?? 'Starting game audio…')
 
   const video = $<HTMLVideoElement>('preview')
   if (video.srcObject !== session.stream) video.srcObject = session.stream
