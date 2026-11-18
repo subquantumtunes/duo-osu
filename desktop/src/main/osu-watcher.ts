@@ -16,6 +16,8 @@ const UNVERIFIED_RETRY_MS = 400
 const MAX_FOLDER_ENTRIES = 300
 const SKIN_RETRY_MS = 15_000
 const MAP_FETCH_TIMEOUT_MS = 3000
+const OSU_FETCH_TIMEOUT_MS = 8000
+const OSU_RETRY_MS = 10_000
 /** No images, so the partner page falls back to its own circles for every sprite. */
 const BUILT_IN_SKIN: OsuSkin = { id: 'built-in', ini: null, images: {} }
 
@@ -47,6 +49,9 @@ export class OsuWatcher {
   private skinLoading = false
   private skinRetryAt = 0
   private checksum: string | null = null
+  private readonly mapIds = new Map<string, number>()
+  private readonly downloaded = new Map<number, string>()
+  private readonly downloadRetryAt = new Map<number, number>()
   private mapRetryAt = 0
   private mapVerified = false
   private mapLoading = false
@@ -149,13 +154,14 @@ export class OsuWatcher {
         // Lazer reports the .osu file relative to its hashed file store (e.g. "3\38\<sha256>"),
         // with an empty songs folder, so it has to be joined to the store's location.
         const lazer = this.status.client === 'lazer' || detected === 'lazer'
-        void this.loadMap(data.beatmap?.checksum, [
+        void this.loadMap(data.beatmap?.checksum, data.beatmap?.id, [
           ...(lazer
             ? [joinIfStrings(this.lazerFiles, data.files?.beatmap), joinIfStrings(this.lazerFiles, data.directPath?.beatmapFile)]
             : []),
           joinIfStrings(songs, data.folders?.beatmap, data.files?.beatmap),
           joinIfStrings(data.directPath?.beatmapFile),
           joinIfStrings(songs, data.directPath?.beatmapFile),
+          joinIfStrings(songs, data.folders?.beatmap),
         ])
         if (!this.precise) this.time(data.beatmap?.time?.live)
         if (this.status.client === 'stable') {
@@ -189,7 +195,7 @@ export class OsuWatcher {
         const bm = menu.bm ?? {}
         const file = bm.path?.file
         this.set({ state: menu.state ?? null, mods: menu.mods?.num ?? 0 })
-        void this.loadMap(bm.md5, [joinIfStrings(data.settings?.folders?.songs, bm.path?.folder, file)])
+        void this.loadMap(bm.md5, bm.id, [joinIfStrings(data.settings?.folders?.songs, bm.path?.folder, file)])
         this.time(bm.time?.current)
       },
     )
@@ -237,8 +243,9 @@ export class OsuWatcher {
    * Lazer keeps maps in a hashed file store with no Songs folder, so after the local paths fail
    * this asks tosu for the current .osu file over HTTP.
    */
-  private async loadMap(checksum: unknown, candidates: (string | null)[]) {
+  private async loadMap(checksum: unknown, beatmapId: unknown, candidates: (string | null)[]) {
     if (typeof checksum !== 'string' || !checksum) return
+    if (typeof beatmapId === 'number' && Number.isInteger(beatmapId) && beatmapId > 0) this.mapIds.set(checksum, beatmapId)
     const now = performance.now()
     if (checksum === this.checksum && (this.mapVerified || this.mapLoading || now < this.mapRetryAt)) return
     if (checksum !== this.checksum) {
@@ -290,10 +297,39 @@ export class OsuWatcher {
     }
     // The reported file name can point at a sibling difficulty, so look through the map's folder
     // for the .osu whose contents actually match.
-    return findByChecksum(
-      files.filter((file) => file.toLowerCase().endsWith('.osu')).map((file) => path.dirname(file)),
+    const local = await findByChecksum(
+      files.map((file) => (file.toLowerCase().endsWith('.osu') ? path.dirname(file) : file)),
       wanted,
     )
+    if (this.checksum !== checksum) return null
+    if (local !== null) return local
+    return this.fetchMapFromOsu(checksum)
+  }
+
+  /**
+   * Last resort when no local file matches: osu! serves every submitted difficulty's .osu by its
+   * beatmap ID, which pins the exact difficulty even if the local copy is an older revision.
+   */
+  private async fetchMapFromOsu(checksum: string) {
+    const id = this.mapIds.get(checksum)
+    if (!id) return null
+    const cached = this.downloaded.get(id)
+    if (cached !== undefined) return cached
+    if (performance.now() < (this.downloadRetryAt.get(id) ?? 0)) return null
+    try {
+      const res = await fetch(`https://osu.ppy.sh/osu/${id}`, { signal: AbortSignal.timeout(OSU_FETCH_TIMEOUT_MS) })
+      const bytes = res.ok ? Buffer.from(await res.arrayBuffer()) : null
+      const text = bytes && bytes.length > 0 && bytes.length <= MAX_MAP_BYTES ? bytes.toString('utf8') : null
+      if (text && text.trimStart().startsWith('osu file format')) {
+        if (md5(bytes!) !== checksum.toLowerCase()) {
+          console.warn(`[osu-coop] Using osu!'s copy of beatmap ${id}; it differs from your local file.`)
+        }
+        this.downloaded.set(id, text)
+        return text
+      }
+    } catch {}
+    this.downloadRetryAt.set(id, performance.now() + OSU_RETRY_MS)
+    return null
   }
 
   /** Raw bytes, so the checksum is computed over exactly what osu! hashed. */
@@ -319,12 +355,12 @@ async function findByChecksum(dirs: string[], wanted: string) {
   for (const dir of new Set(dirs)) {
     let names: string[]
     try {
-      names = (await readdir(dir)).slice(0, MAX_FOLDER_ENTRIES)
+      // Filter before capping: big sets hold hundreds of hitsounds and images besides the .osu files.
+      names = (await readdir(dir)).filter((name) => name.toLowerCase().endsWith('.osu')).slice(0, MAX_FOLDER_ENTRIES)
     } catch {
       continue
     }
     for (const name of names) {
-      if (!name.toLowerCase().endsWith('.osu')) continue
       const bytes = await readMapFile(path.join(dir, name))
       if (bytes && md5(bytes) === wanted) return bytes.toString('utf8')
     }
