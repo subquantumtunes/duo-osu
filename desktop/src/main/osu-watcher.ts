@@ -144,9 +144,19 @@ export class OsuWatcher {
         if (!this.precise) this.time(data.beatmap?.time?.live)
         if (this.status.client === 'stable') {
           const skinName = data.folders?.skin
-          const skinDir =
-            joinIfStrings(data.directPath?.skinFolder) ?? joinIfStrings(data.folders?.game, 'Skins', skinName)
-          void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current', skinDir)
+          const game = data.folders?.game
+          const skinFolder = data.directPath?.skinFolder
+          // tosu versions disagree on whether these are absolute, relative to the game folder,
+          // or just the skin's name, so every reading is tried.
+          const skinDirs = [
+            joinIfStrings(skinFolder),
+            joinIfStrings(game, skinFolder),
+            joinIfStrings(game, 'Skins', skinFolder),
+            joinIfStrings(game, 'Skins', skinName),
+            joinIfStrings(game, skinName),
+            joinIfStrings(process.env.LOCALAPPDATA, 'osu!', 'Skins', skinName),
+          ]
+          void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current', skinDirs)
         }
       },
     )
@@ -186,13 +196,13 @@ export class OsuWatcher {
   }
 
   /** Refetches only when the skin folder changes, or after a failed attempt has cooled down. */
-  private async loadSkin(id: string, dir: string | null) {
+  private async loadSkin(id: string, dirs: (string | null)[]) {
     if (this.skinLoading) return
     if (id === this.skinId && (this.skin || performance.now() < this.skinRetryAt)) return
     this.skinId = id
     this.skinLoading = true
     try {
-      const skin = await fetchSkin(this.port, id, dir)
+      const skin = await fetchSkin(this.port, id, dirs)
       if (this.skinId !== id || this.status.client !== 'stable') return
       this.skin = skin
       if (skin) {

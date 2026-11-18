@@ -114,12 +114,28 @@ async function isDir(dir: string) {
   }
 }
 
+async function firstDir(candidates: (string | null)[]) {
+  for (const dir of candidates) if (dir && path.isAbsolute(dir) && (await isDir(dir))) return dir
+  return null
+}
+
 /**
- * Reads the skin osu! stable is using. Reads straight from the skin folder when it can be
- * found, so tosu is never asked for files that don't exist; otherwise goes through tosu.
+ * Reads the skin osu! stable is using, straight from its folder on disk. Asking tosu's
+ * /files/skin route for a file the skin doesn't have (e.g. a missing @2x) can crash tosu,
+ * so tosu is only used when the caller opts in and no folder was found.
  */
-export async function fetchSkin(port: number, id: string, skinDir?: string | null): Promise<OsuSkin | null> {
-  const source = skinDir && (await isDir(skinDir)) ? diskSource(skinDir) : tosuSource(port)
+export async function fetchSkin(
+  port: number,
+  id: string,
+  skinDirs: (string | null)[],
+  allowTosu = false,
+): Promise<OsuSkin | null> {
+  const dir = await firstDir(skinDirs)
+  if (!dir && !allowTosu) {
+    console.warn(`[osu-coop] Couldn't find the skin folder for "${id}" (tried ${skinDirs.filter(Boolean).join(', ') || 'nothing'}).`)
+    return null
+  }
+  const source = dir ? diskSource(dir) : tosuSource(port)
   const iniBuf = await source.read('skin.ini', MAX_INI_BYTES)
   const ini = iniBuf ? iniBuf.toString('utf8').replace(/^\uFEFF/, '') : null
   const prefix = (ini && iniValue(ini, 'Fonts', 'HitCirclePrefix'))?.replace(/\\/g, '/') || 'default'
