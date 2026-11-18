@@ -1,3 +1,5 @@
+import { readdir, readFile, stat } from 'node:fs/promises'
+import path from 'node:path'
 import type { OsuSkin, SkinImage } from '../shared/api'
 
 const TIMEOUT_MS = 3000
@@ -16,29 +18,73 @@ const SPRITES: [string, string][] = [
   ['cursor', 'cursor'],
 ]
 
-async function get(url: string, max: number) {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
-    if (!res.ok) return null
-    const buf = Buffer.from(await res.arrayBuffer())
-    return buf.length > 0 && buf.length <= max ? buf : null
-  } catch {
-    return null
+/** Where skin files come from: the skin folder on disk, or tosu's /files/skin route. */
+interface SkinSource {
+  /** Returns the file only if it exists; never errors on a missing file. */
+  read(name: string, max: number): Promise<Buffer | null>
+}
+
+function cleanParts(name: string) {
+  return name.split(/[\\/]/).filter((part) => part && part !== '.' && part !== '..')
+}
+
+/**
+ * Lists each folder once and only opens files that are in the listing, so a skin without
+ * @2x files is never asked for them. Names match case-insensitively, like osu! on Windows.
+ */
+function diskSource(root: string): SkinSource {
+  const listings = new Map<string, Promise<Map<string, string>>>()
+  const list = (dir: string) => {
+    let listing = listings.get(dir)
+    if (!listing) {
+      listing = readdir(dir)
+        .then((names) => new Map(names.map((n) => [n.toLowerCase(), n])))
+        .catch(() => new Map<string, string>())
+      listings.set(dir, listing)
+    }
+    return listing
+  }
+  return {
+    async read(name, max) {
+      const parts = cleanParts(name)
+      const file = parts.pop()
+      if (!file) return null
+      const dir = path.join(root, ...parts)
+      const actual = (await list(dir)).get(file.toLowerCase())
+      if (!actual) return null
+      try {
+        const full = path.join(dir, actual)
+        const info = await stat(full)
+        if (!info.isFile() || info.size === 0 || info.size > max) return null
+        return await readFile(full)
+      } catch {
+        return null
+      }
+    },
   }
 }
 
-function urlPath(name: string) {
-  return name
-    .split('/')
-    .filter((part) => part && part !== '.' && part !== '..')
-    .map(encodeURIComponent)
-    .join('/')
+function tosuSource(port: number): SkinSource {
+  const base = `http://127.0.0.1:${port}/files/skin`
+  return {
+    async read(name, max) {
+      try {
+        const url = `${base}/${cleanParts(name).map(encodeURIComponent).join('/')}`
+        const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+        if (!res.ok) return null
+        const buf = Buffer.from(await res.arrayBuffer())
+        return buf.length > 0 && buf.length <= max ? buf : null
+      } catch {
+        return null
+      }
+    },
+  }
 }
 
-/** Prefers the @2x file, like osu! does on high resolutions. */
-async function image(base: string, name: string): Promise<SkinImage | null> {
+/** Prefers the @2x file like osu! does on high resolutions, and uses the plain file otherwise. */
+async function image(source: SkinSource, name: string): Promise<SkinImage | null> {
   for (const hd of [true, false]) {
-    const buf = await get(`${base}/${urlPath(name)}${hd ? '@2x' : ''}.png`, MAX_IMAGE_BYTES)
+    const buf = await source.read(`${name}${hd ? '@2x' : ''}.png`, MAX_IMAGE_BYTES)
     if (buf && PNG_MAGIC.every((byte, i) => buf[i] === byte)) return { hd, data: buf.toString('base64') }
   }
   return null
@@ -60,17 +106,28 @@ function iniValue(ini: string, section: string, key: string) {
   return null
 }
 
-/** Reads the skin osu! stable is using through tosu's /files/skin route. */
-export async function fetchSkin(port: number, id: string): Promise<OsuSkin | null> {
-  const base = `http://127.0.0.1:${port}/files/skin`
-  const iniBuf = await get(`${base}/skin.ini`, MAX_INI_BYTES)
+async function isDir(dir: string) {
+  try {
+    return (await stat(dir)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Reads the skin osu! stable is using. Reads straight from the skin folder when it can be
+ * found, so tosu is never asked for files that don't exist; otherwise goes through tosu.
+ */
+export async function fetchSkin(port: number, id: string, skinDir?: string | null): Promise<OsuSkin | null> {
+  const source = skinDir && (await isDir(skinDir)) ? diskSource(skinDir) : tosuSource(port)
+  const iniBuf = await source.read('skin.ini', MAX_INI_BYTES)
   const ini = iniBuf ? iniBuf.toString('utf8').replace(/^\uFEFF/, '') : null
   const prefix = (ini && iniValue(ini, 'Fonts', 'HitCirclePrefix'))?.replace(/\\/g, '/') || 'default'
   const entries: [string, string][] = [
     ...SPRITES,
     ...Array.from({ length: 10 }, (_, d): [string, string] => [`digit-${d}`, `${prefix}-${d}`]),
   ]
-  const loaded = await Promise.all(entries.map(async ([key, file]) => [key, await image(base, file)] as const))
+  const loaded = await Promise.all(entries.map(async ([key, file]) => [key, await image(source, file)] as const))
   const images: Record<string, SkinImage> = {}
   for (const [key, img] of loaded) if (img) images[key] = img
   if (Object.keys(images).length === 0) return null

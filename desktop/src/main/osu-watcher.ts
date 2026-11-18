@@ -144,7 +144,9 @@ export class OsuWatcher {
         if (!this.precise) this.time(data.beatmap?.time?.live)
         if (this.status.client === 'stable') {
           const skinName = data.folders?.skin
-          void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current')
+          const skinDir =
+            joinIfStrings(data.directPath?.skinFolder) ?? joinIfStrings(data.folders?.game, 'Skins', skinName)
+          void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current', skinDir)
         }
       },
     )
@@ -184,13 +186,13 @@ export class OsuWatcher {
   }
 
   /** Refetches only when the skin folder changes, or after a failed attempt has cooled down. */
-  private async loadSkin(id: string) {
+  private async loadSkin(id: string, dir: string | null) {
     if (this.skinLoading) return
     if (id === this.skinId && (this.skin || performance.now() < this.skinRetryAt)) return
     this.skinId = id
     this.skinLoading = true
     try {
-      const skin = await fetchSkin(this.port, id)
+      const skin = await fetchSkin(this.port, id, dir)
       if (this.skinId !== id || this.status.client !== 'stable') return
       this.skin = skin
       if (skin) {
