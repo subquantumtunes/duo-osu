@@ -8,7 +8,7 @@
     "build": "node build.mjs",
     "start": "node build.mjs && electron .",
     "typecheck": "tsc -p tsconfig.json",
-    "dist": "node build.mjs && electron-builder --win portable"
+    "dist": "node build.mjs && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "koffi": "^3.3.8",
@@ -26,10 +26,23 @@
   },
   "build": {
     "appId": "app.osucoop.host",
-    "productName": "osu co-op host",
+    "productName": "dosu",
     "files": ["dist/**/*", "package.json"],
     "asarUnpack": ["node_modules/koffi/**", "node_modules/loopback-capture/**"],
     "directories": { "output": "release" },
-    "win": { "target": ["portable"] }
+    "win": {
+      "target": ["nsis"],
+      "executableName": "dosu",
+      "artifactName": "dosu-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "dosu",
+      "runAfterFinish": true
+    }
   }
 }

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Crosshair, Keyboard, MonitorUp } from 'lucide-react'
+import { Crosshair, Download, Keyboard, MonitorUp } from 'lucide-react'
 import { SiteHeader } from '@/components/site-header'
 import { JoinForm } from '@/components/home/join-form'
 import { HowItWorks } from '@/components/home/how-it-works'
@@ -34,13 +34,30 @@ export default function Page() {
             <div className="flex flex-col gap-1.5">
               <h2 className="text-xl font-semibold">Host a session</h2>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                You run osu! on your PC. Share your screen, run the tiny input bridge, and send the room code to your
-                partner.
+                You run osu! on your PC. Install dosu, start{' '}
+                <a
+                  href="https://github.com/tosuapp/tosu/releases/latest"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-foreground underline underline-offset-2"
+                >
+                  tosu
+                </a>
+                , and send the room code dosu gives you to your partner.
               </p>
             </div>
-            <Link href="/host" className={cn(buttonVariants({ size: 'lg' }), 'mt-auto w-fit px-4')}>
-              Start hosting
-            </Link>
+            <div className="mt-auto flex flex-col gap-2">
+              <a href="/download" className={cn(buttonVariants({ size: 'lg' }), 'w-fit px-4')}>
+                <Download aria-hidden="true" />
+                Download dosu for Windows
+              </a>
+              <p className="text-xs text-muted-foreground">
+                {'Windows 10 or 11. If SmartScreen appears, click More info, then Run anyway. '}
+                <Link href="/host" className="underline underline-offset-2 hover:text-foreground">
+                  Host from the browser instead
+                </Link>
+              </p>
+            </div>
           </div>
           <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
             <Crosshair className="size-6 text-accent" aria-hidden="true" />
