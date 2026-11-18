@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -13,6 +13,8 @@ const MIN_TIME_INTERVAL_MS = 3
 const RETRY_MS = 3000
 // tosu can report a new map's checksum a few updates before its file path catches up.
 const UNVERIFIED_RETRY_MS = 400
+const FALLBACK_GRACE_MS = 2500
+const MAX_FOLDER_ENTRIES = 300
 const SKIN_RETRY_MS = 15_000
 const MAP_FETCH_TIMEOUT_MS = 3000
 /** No images, so the partner page falls back to its own circles for every sprite. */
@@ -39,6 +41,8 @@ export class OsuWatcher {
   private checksum: string | null = null
   private mapRetryAt = 0
   private mapVerified = false
+  private previousChecksum: string | null = null
+  private fallbackSince: number | null = null
   private precise = false
   private lastTimeSent = 0
   private stopped = false
@@ -231,8 +235,10 @@ export class OsuWatcher {
     const now = performance.now()
     if (checksum === this.checksum && ((this.map && this.mapVerified) || now < this.mapRetryAt)) return
     if (checksum !== this.checksum) {
+      this.previousChecksum = this.map?.checksum?.toLowerCase() ?? null
       this.checksum = checksum
       this.mapVerified = false
+      this.fallbackSince = null
     }
     this.mapRetryAt = now + RETRY_MS
     const wanted = checksum.toLowerCase()
@@ -258,9 +264,23 @@ export class OsuWatcher {
       if (text && md5(Buffer.from(text, 'utf8')) === wanted) return this.acceptMap(checksum, text, true)
       fallback ??= text
     }
-    if (fallback) {
-      // Probably the previous map's file while tosu's paths catch up; use it for now but keep looking.
+    // The reported file name can lag behind the checksum, pointing at a sibling difficulty, so
+    // look through the map's folder for the .osu whose contents actually match.
+    const sibling = await findByChecksum(
+      files.filter((file) => file.toLowerCase().endsWith('.osu')).map((file) => path.dirname(file)),
+      wanted,
+    )
+    if (this.checksum !== checksum) return
+    if (sibling) return this.acceptMap(checksum, sibling, true)
+    if (this.fallbackSince === null) this.fallbackSince = performance.now()
+    const stale = fallback !== null && this.previousChecksum !== null && md5(Buffer.from(fallback, 'utf8')) === this.previousChecksum
+    if (fallback && !stale && performance.now() - this.fallbackSince >= FALLBACK_GRACE_MS) {
+      // Nothing matched for a while; the checksum itself may be off, so send the best guess.
       this.acceptMap(checksum, fallback, false)
+      this.mapRetryAt = performance.now() + RETRY_MS
+      return
+    }
+    if (fallback) {
       this.mapRetryAt = performance.now() + UNVERIFIED_RETRY_MS
       return
     }
@@ -293,6 +313,28 @@ export class OsuWatcher {
 
 function md5(bytes: Buffer) {
   return createHash('md5').update(bytes).digest('hex')
+}
+
+async function findByChecksum(dirs: string[], wanted: string) {
+  for (const dir of new Set(dirs)) {
+    let names: string[]
+    try {
+      names = (await readdir(dir)).slice(0, MAX_FOLDER_ENTRIES)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.toLowerCase().endsWith('.osu')) continue
+      try {
+        const file = path.join(dir, name)
+        const info = await stat(file)
+        if (!info.isFile() || info.size > MAX_MAP_BYTES) continue
+        const bytes = await readFile(file)
+        if (md5(bytes) === wanted) return bytes.toString('utf8')
+      } catch {}
+    }
+  }
+  return null
 }
 
 /**
