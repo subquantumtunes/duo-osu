@@ -14,6 +14,7 @@ import {
   shell,
 } from 'electron'
 import { IPC, type ScreenSource } from '../shared/api'
+import { GameAudio } from './game-audio'
 import { createInjector } from './input'
 import { OsuWatcher } from './osu-watcher'
 
@@ -42,6 +43,11 @@ const watcher = new OsuWatcher(TOSU_PORT, {
   map: (map) => win?.webContents.send(IPC.map, map),
   skin: (skin) => win?.webContents.send(IPC.skin, skin),
 })
+
+const gameAudio = new GameAudio(
+  (chunk) => win?.webContents.send(IPC.gameAudio, chunk),
+  (status) => win?.webContents.send(IPC.gameAudioStatus, status),
+)
 
 function fromHostWindow(event: IpcMainEvent | IpcMainInvokeEvent) {
   return win !== null && event.sender === win.webContents
@@ -122,6 +128,12 @@ function registerIpc() {
   ipcMain.on(IPC.release, (event) => {
     if (fromHostWindow(event)) injector.releaseAll()
   })
+
+  ipcMain.handle(IPC.gameAudioStart, (event) => (fromHostWindow(event) ? gameAudio.start() : null))
+
+  ipcMain.on(IPC.gameAudioStop, (event) => {
+    if (fromHostWindow(event)) gameAudio.stop()
+  })
 }
 
 function createWindow() {
@@ -153,6 +165,7 @@ function createWindow() {
   win.webContents.on('render-process-gone', () => injector.releaseAll())
   win.on('closed', () => {
     injector.releaseAll()
+    gameAudio.stop()
     win = null
   })
 
@@ -167,12 +180,13 @@ app.whenReady().then(() => {
   ses.setPermissionRequestHandler((wc, permission, callback) => {
     callback(wc === win?.webContents && (permission === 'media' || permission === 'display-capture'))
   })
-  // Capture the screen picked in the app instead of showing the system picker. On Windows the
-  // loopback device carries the game audio.
+  // Capture the screen picked in the app instead of showing the system picker. Audio is not taken
+  // from here: system loopback would include Discord and everything else, so GameAudio captures
+  // the osu! process on its own.
   ses.setDisplayMediaRequestHandler(
     (_request, callback) => {
       if (!selected) return callback(null)
-      callback(process.platform === 'win32' ? { video: selected, audio: 'loopback' } : { video: selected })
+      callback({ video: selected })
     },
     { useSystemPicker: false },
   )

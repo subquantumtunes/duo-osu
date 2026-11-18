@@ -23,6 +23,8 @@ export type OsuSkin = { id: string; ini: string | null; images: Record<string, S
 
 export type InputStatus = { native: boolean; reason: string | null }
 
+export type GameAudioStatus = { active: boolean; reason: string | null }
+
 export type CoopApi = {
   listScreens(): Promise<ScreenSource[]>
   selectScreen(id: string): Promise<{ width: number; height: number } | null>
@@ -36,6 +38,10 @@ export type CoopApi = {
   onTime(cb: (ms: number) => void): () => void
   onMap(cb: (map: OsuMap) => void): () => void
   onSkin(cb: (skin: OsuSkin) => void): () => void
+  startGameAudio(): Promise<GameAudioStatus>
+  stopGameAudio(): void
+  onGameAudio(cb: (chunk: Uint8Array) => void): () => void
+  onGameAudioStatus(cb: (status: GameAudioStatus) => void): () => void
 }
 
 export const IPC = {
@@ -51,4 +57,8 @@ export const IPC = {
   time: 'coop:time',
   map: 'coop:map',
   skin: 'coop:skin',
+  gameAudioStart: 'coop:game-audio-start',
+  gameAudioStop: 'coop:game-audio-stop',
+  gameAudio: 'coop:game-audio',
+  gameAudioStatus: 'coop:game-audio-status',
 } as const

@@ -13,6 +13,7 @@ import {
   openInputChannel,
 } from '@/lib/protocol'
 import type { PartnerStats } from '@/lib/timing'
+import { createGameAudioTrack } from './game-audio-track'
 
 export type HostStatus = 'idle' | 'starting' | 'waiting' | 'connected' | 'error'
 
@@ -44,8 +45,6 @@ const RETRY_COOLDOWN_MS = 3000
 const STATS_INTERVAL_MS = 1000
 const VIDEO_RECALL_MS = 2000
 const VIDEO_RECALL_LIMIT = 5
-
-const SHARE_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
 
 /**
  * Moves one codec to the front of the offered video codecs. The guest answers with the first
@@ -128,6 +127,7 @@ export class HostSession {
   partner: PartnerStats | null = null
   encoder: EncoderStats | null = null
 
+  private gameAudio: ReturnType<typeof createGameAudioTrack> = null
   private sync = { live: false, mods: 0 }
   private map: { checksum: string; text: string } | null = null
   private skin: { id: string; text: string } | null = null
@@ -174,7 +174,7 @@ export class HostSession {
     try {
       media = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: { ideal: this.quality.fps, max: this.quality.fps } },
-        audio: SHARE_AUDIO,
+        audio: false,
       })
     } catch (err) {
       console.error('[osu-coop] screen capture failed:', err)
@@ -188,6 +188,8 @@ export class HostSession {
       video.contentHint = 'motion'
       video.addEventListener('ended', () => this.stop())
     }
+    this.gameAudio = createGameAudioTrack(window.coop)
+    if (this.gameAudio) media.addTrack(this.gameAudio.track)
     this.stream = media
     this.hasAudio = media.getAudioTracks().length > 0
 
@@ -227,6 +229,8 @@ export class HostSession {
     this.closeLink()
     this.peer?.destroy()
     this.peer = null
+    this.gameAudio?.dispose()
+    this.gameAudio = null
     this.stream?.getTracks().forEach((t) => t.stop())
     this.stream = null
     this.roomCode = null

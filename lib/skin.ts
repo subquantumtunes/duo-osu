@@ -6,6 +6,7 @@ export type Skin = {
   approach: SkinSprite | null
   sliderBall: SkinSprite | null
   reverseArrow: SkinSprite | null
+  followCircle: SkinSprite | null
   cursor: SkinSprite | null
   /** Only set when all ten digits exist, so numbers never mix fonts. */
   digits: SkinSprite[] | null
@@ -67,8 +68,17 @@ export async function loadSkin(text: string): Promise<Skin | null> {
     return null
   }
   const images = payload.images && typeof payload.images === 'object' ? payload.images : {}
-  const [hitcircle, overlay, approach, sliderBall, reverseArrow, cursor, ...digits] = await Promise.all(
-    ['hitcircle', 'hitcircleoverlay', 'approachcircle', 'sliderb', 'reversearrow', 'cursor', ...Array.from({ length: 10 }, (_, d) => `digit-${d}`)].map(
+  const [hitcircle, overlay, approach, sliderBall, reverseArrow, followCircle, cursor, ...digits] = await Promise.all(
+    [
+      'hitcircle',
+      'hitcircleoverlay',
+      'approachcircle',
+      'sliderb',
+      'reversearrow',
+      'sliderfollowcircle',
+      'cursor',
+      ...Array.from({ length: 10 }, (_, d) => `digit-${d}`),
+    ].map(
       (name) => decode(images[name]),
     ),
   )
@@ -87,6 +97,7 @@ export async function loadSkin(text: string): Promise<Skin | null> {
     approach,
     sliderBall,
     reverseArrow,
+    followCircle,
     cursor,
     digits: allDigits ? digits : null,
     comboColors: comboColors.length > 0 ? comboColors : null,
@@ -99,7 +110,7 @@ export async function loadSkin(text: string): Promise<Skin | null> {
 
 export function closeSkin(skin: Skin | null) {
   if (!skin) return
-  for (const sprite of [skin.hitcircle, skin.overlay, skin.approach, skin.sliderBall, skin.reverseArrow, skin.cursor, ...(skin.digits ?? [])]) {
+  for (const sprite of [skin.hitcircle, skin.overlay, skin.approach, skin.sliderBall, skin.reverseArrow, skin.followCircle, skin.cursor, ...(skin.digits ?? [])]) {
     sprite?.image.close()
   }
 }

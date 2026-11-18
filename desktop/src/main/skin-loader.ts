@@ -12,6 +12,7 @@ const SPRITES: [string, string][] = [
   ['approachcircle', 'approachcircle'],
   ['sliderb', 'sliderb0'],
   ['reversearrow', 'reversearrow'],
+  ['sliderfollowcircle', 'sliderfollowcircle'],
   ['cursor', 'cursor'],
 ]
 

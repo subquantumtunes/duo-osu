@@ -22,6 +22,10 @@ const api: CoopApi = {
   onTime: (cb) => subscribe(IPC.time, cb),
   onMap: (cb) => subscribe(IPC.map, cb),
   onSkin: (cb) => subscribe(IPC.skin, cb),
+  startGameAudio: () => ipcRenderer.invoke(IPC.gameAudioStart),
+  stopGameAudio: () => ipcRenderer.send(IPC.gameAudioStop),
+  onGameAudio: (cb) => subscribe(IPC.gameAudio, cb),
+  onGameAudioStatus: (cb) => subscribe(IPC.gameAudioStatus, cb),
 }
 
 contextBridge.exposeInMainWorld('coop', api)

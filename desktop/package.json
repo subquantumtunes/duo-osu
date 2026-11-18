@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "koffi": "^3.3.8",
+    "loopback-capture": "^4.0.0",
     "ws": "^8.23.0"
   },
   "devDependencies": {
@@ -27,7 +28,7 @@
     "appId": "app.osucoop.host",
     "productName": "osu co-op host",
     "files": ["dist/**/*", "package.json"],
-    "asarUnpack": ["node_modules/koffi/**"],
+    "asarUnpack": ["node_modules/koffi/**", "node_modules/loopback-capture/**"],
     "directories": { "output": "release" },
     "win": { "target": ["portable"] }
   }

@@ -82,6 +82,84 @@ function drawReverseArrow(ctx: Ctx, skin: Skin | null, x: number, y: number, ang
   ctx.restore()
 }
 
+function parseColor(color: string): [number, number, number] {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color)
+  if (hex) {
+    const n = parseInt(hex[1], 16)
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  }
+  const parts = color.match(/\d+/g)?.map(Number) ?? []
+  return parts.length >= 3 ? [parts[0], parts[1], parts[2]] : [255, 255, 255]
+}
+
+function mixColor([r, g, b]: [number, number, number], toward: number, amount: number) {
+  const mix = (c: number) => Math.round(c + (toward - c) * amount)
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`
+}
+
+/** Stable draws slider tracks see-through, with an opaque border ring. */
+const SLIDER_BODY_ALPHA = 0.7
+const SLIDER_BODY_WIDTH = 0.875
+const SLIDER_GRADIENT_STEPS = 8
+
+/**
+ * Draws one slider into an offscreen layer before compositing, so the track's
+ * see-through alpha applies once instead of stacking where strokes overlap.
+ */
+function drawSliderBody(
+  ctx: Ctx,
+  layer: HTMLCanvasElement,
+  trace: (c: Ctx) => void,
+  radius: number,
+  border: string,
+  track: string,
+  alpha: number,
+) {
+  const lc = layer.getContext('2d')
+  if (!lc) return
+  if (layer.width !== ctx.canvas.width || layer.height !== ctx.canvas.height) {
+    layer.width = ctx.canvas.width
+    layer.height = ctx.canvas.height
+  }
+  const blit = (a: number) => {
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.globalAlpha = a
+    ctx.drawImage(layer, 0, 0)
+    ctx.restore()
+  }
+  const reset = () => {
+    lc.setTransform(1, 0, 0, 1, 0, 0)
+    lc.clearRect(0, 0, layer.width, layer.height)
+    lc.setTransform(ctx.getTransform())
+    lc.globalCompositeOperation = 'source-over'
+    lc.lineCap = 'round'
+    lc.lineJoin = 'round'
+    lc.beginPath()
+    trace(lc)
+  }
+  const base = parseColor(track)
+  const bodyWidth = radius * 2 * SLIDER_BODY_WIDTH
+
+  reset()
+  for (let i = 0; i < SLIDER_GRADIENT_STEPS; i++) {
+    const t = i / (SLIDER_GRADIENT_STEPS - 1)
+    lc.lineWidth = bodyWidth * (1 - t * 0.85)
+    lc.strokeStyle = t < 0.5 ? mixColor(base, 0, 0.25 - t * 0.5) : mixColor(base, 255, (t - 0.5) * 0.6)
+    lc.stroke()
+  }
+  blit(alpha * SLIDER_BODY_ALPHA)
+
+  reset()
+  lc.lineWidth = radius * 2
+  lc.strokeStyle = border
+  lc.stroke()
+  lc.globalCompositeOperation = 'destination-out'
+  lc.lineWidth = bodyWidth
+  lc.stroke()
+  blit(alpha)
+}
+
 /** osu! sizes cursor art for a 768px-tall screen. */
 function drawCursor(ctx: Ctx, skin: Skin | null, x: number, y: number, fieldScale: number) {
   const unit = (fieldScale * 480) / 768
@@ -151,6 +229,7 @@ export function Playfield({
     const diff = difficultyFor(map, mods)
     const colors = skin?.comboColors ?? COMBO_COLORS
     const tint = makeTinter()
+    const sliderLayer = document.createElement('canvas')
     const firstObject = map.objects.find((o) => o.kind !== 'spinner')
     let frame = 0
 
@@ -205,27 +284,21 @@ export function Playfield({
         ctx.globalAlpha = bodyAlpha
 
         if (obj.kind === 'slider' && obj.path) {
-          ctx.beginPath()
-          obj.path.points.forEach((p, idx) => {
-            const s = toScreen(obj.x + p.x - obj.path!.points[0].x, obj.y + p.y - obj.path!.points[0].y)
-            if (idx === 0) ctx.moveTo(s.x, s.y)
-            else ctx.lineTo(s.x, s.y)
-          })
-          ctx.lineCap = 'round'
-          ctx.lineJoin = 'round'
-          ctx.strokeStyle = skin ? (skin.sliderBorder ?? '#fff') : 'rgba(255,255,255,0.85)'
-          ctx.lineWidth = radius * 2
-          ctx.stroke()
-          ctx.lineWidth = radius * 1.8
-          if (skin) {
-            ctx.strokeStyle = skin.sliderTrack ?? color
-            ctx.stroke()
-            ctx.strokeStyle = 'rgba(0,0,0,0.55)'
-            ctx.stroke()
-          } else {
-            ctx.strokeStyle = 'rgba(20,16,28,0.9)'
-            ctx.stroke()
-          }
+          const path = obj.path
+          drawSliderBody(
+            ctx,
+            sliderLayer,
+            (c) =>
+              path.points.forEach((p, idx) => {
+                const s = toScreen(obj.x + p.x - path.points[0].x, obj.y + p.y - path.points[0].y)
+                if (idx === 0) c.moveTo(s.x, s.y)
+                else c.lineTo(s.x, s.y)
+              }),
+            radius,
+            skin?.sliderBorder ?? '#fff',
+            skin?.sliderTrack ?? color,
+            bodyAlpha,
+          )
           const pts = obj.path.points
           const slides = obj.slides ?? 1
           if (slides > 1 && obj.slideDuration && pts.length > 1) {
@@ -264,6 +337,9 @@ export function Playfield({
               ctx.arc(b.x, b.y, radius * 0.8, 0, Math.PI * 2)
               ctx.fillStyle = color
               ctx.fill()
+            }
+            if (skin?.followCircle && time <= obj.end) {
+              drawSprite(ctx, skin.followCircle, skin.followCircle.hd, b.x, b.y, unit)
             }
           }
         }
