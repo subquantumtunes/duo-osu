@@ -188,7 +188,7 @@ export function GuestStage({
           ref={videoRef}
           autoPlay
           playsInline
-          className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-35')}
+          className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-10')}
         />
         {playfield && <Playfield {...playfield} videoRef={videoRef} />}
         {!playfield && videoIssue && videoIssue !== 'connecting' ? (
