@@ -13,7 +13,6 @@ const MIN_TIME_INTERVAL_MS = 3
 const RETRY_MS = 3000
 // tosu can report a new map's checksum a few updates before its file path catches up.
 const UNVERIFIED_RETRY_MS = 400
-const FALLBACK_GRACE_MS = 2500
 const MAX_FOLDER_ENTRIES = 300
 const SKIN_RETRY_MS = 15_000
 const MAP_FETCH_TIMEOUT_MS = 3000
@@ -41,8 +40,8 @@ export class OsuWatcher {
   private checksum: string | null = null
   private mapRetryAt = 0
   private mapVerified = false
-  private previousChecksum: string | null = null
-  private fallbackSince: number | null = null
+  private mapLoading = false
+  private mapWarned = false
   private precise = false
   private lastTimeSent = 0
   private stopped = false
@@ -230,81 +229,69 @@ export class OsuWatcher {
    * this asks tosu for the current .osu file over HTTP.
    */
   private async loadMap(checksum: unknown, candidates: (string | null)[]) {
-    const files = [...new Set(candidates.filter((file): file is string => !!file && path.isAbsolute(file)))]
     if (typeof checksum !== 'string' || !checksum) return
     const now = performance.now()
-    if (checksum === this.checksum && ((this.map && this.mapVerified) || now < this.mapRetryAt)) return
+    if (checksum === this.checksum && (this.mapVerified || this.mapLoading || now < this.mapRetryAt)) return
     if (checksum !== this.checksum) {
-      this.previousChecksum = this.map?.checksum?.toLowerCase() ?? null
       this.checksum = checksum
       this.mapVerified = false
-      this.fallbackSince = null
+      this.mapWarned = false
     }
-    this.mapRetryAt = now + RETRY_MS
-    const wanted = checksum.toLowerCase()
-    let fallback: string | null = null
-    let lastError: unknown = null
-    for (const file of files) {
-      try {
-        const info = await stat(file)
-        if (!info.isFile()) continue
-        if (info.size > MAX_MAP_BYTES) throw new Error('file is too large')
-        const bytes = await readFile(file)
-        if (this.checksum !== checksum) return
-        const text = bytes.toString('utf8')
-        if (md5(bytes) === wanted) return this.acceptMap(checksum, text, true)
-        fallback ??= text
-      } catch (err) {
-        lastError = err
+    this.mapLoading = true
+    try {
+      const text = await this.findMap(checksum, candidates)
+      if (this.checksum !== checksum) return
+      if (text !== null) {
+        this.mapVerified = true
+        if (this.map?.checksum === checksum && this.map.text === text) return
+        this.map = { checksum, text }
+        this.events.map(this.map)
+        return
       }
+      // tosu's file path often lags behind the checksum for a few updates after a map change, so
+      // keep retrying quickly. A file that doesn't match is a sibling difficulty or an earlier map,
+      // and is never sent.
+      this.mapRetryAt = performance.now() + UNVERIFIED_RETRY_MS
+      if (!this.mapWarned) {
+        this.mapWarned = true
+        console.warn(`[osu-coop] Waiting for the beatmap file matching ${checksum} (tried ${candidates.filter(Boolean).join(', ')}).`)
+      }
+    } finally {
+      if (this.checksum === checksum) this.mapLoading = false
+    }
+  }
+
+  /** Returns the .osu text whose raw bytes hash to the checksum osu! reports, or null. */
+  private async findMap(checksum: string, candidates: (string | null)[]) {
+    const files = [...new Set(candidates.filter((file): file is string => !!file && path.isAbsolute(file)))]
+    const wanted = checksum.toLowerCase()
+    for (const file of files) {
+      const bytes = await readMapFile(file)
+      if (this.checksum !== checksum) return null
+      if (bytes && md5(bytes) === wanted) return bytes.toString('utf8')
     }
     if (this.status.source === 'tosu') {
-      const text = await this.fetchMapFromTosu()
-      if (this.checksum !== checksum) return
-      if (text && md5(Buffer.from(text, 'utf8')) === wanted) return this.acceptMap(checksum, text, true)
-      fallback ??= text
+      const bytes = await this.fetchMapFromTosu()
+      if (this.checksum !== checksum) return null
+      if (bytes && md5(bytes) === wanted) return bytes.toString('utf8')
     }
-    // The reported file name can lag behind the checksum, pointing at a sibling difficulty, so
-    // look through the map's folder for the .osu whose contents actually match.
-    const sibling = await findByChecksum(
+    // The reported file name can point at a sibling difficulty, so look through the map's folder
+    // for the .osu whose contents actually match.
+    return findByChecksum(
       files.filter((file) => file.toLowerCase().endsWith('.osu')).map((file) => path.dirname(file)),
       wanted,
     )
-    if (this.checksum !== checksum) return
-    if (sibling) return this.acceptMap(checksum, sibling, true)
-    if (this.fallbackSince === null) this.fallbackSince = performance.now()
-    const stale = fallback !== null && this.previousChecksum !== null && md5(Buffer.from(fallback, 'utf8')) === this.previousChecksum
-    if (fallback && !stale && performance.now() - this.fallbackSince >= FALLBACK_GRACE_MS) {
-      // Nothing matched for a while; the checksum itself may be off, so send the best guess.
-      this.acceptMap(checksum, fallback, false)
-      this.mapRetryAt = performance.now() + RETRY_MS
-      return
-    }
-    if (fallback) {
-      this.mapRetryAt = performance.now() + UNVERIFIED_RETRY_MS
-      return
-    }
-    console.warn(
-      `[osu-coop] Couldn't read the beatmap file (tried ${files.join(', ')}): ${lastError instanceof Error ? lastError.message : (lastError ?? 'not found')}`,
-    )
-    this.map = null
   }
 
-  private acceptMap(checksum: string, text: string, verified: boolean) {
-    this.mapVerified = verified
-    if (this.map?.checksum === checksum && this.map.text === text) return
-    this.map = { checksum, text }
-    this.events.map(this.map)
-  }
-
+  /** Raw bytes, so the checksum is computed over exactly what osu! hashed. */
   private async fetchMapFromTosu() {
     try {
       const res = await fetch(`http://127.0.0.1:${this.port}/files/beatmap/file`, {
         signal: AbortSignal.timeout(MAP_FETCH_TIMEOUT_MS),
       })
       if (!res.ok) return null
-      const text = await res.text()
-      return text.length > 0 && text.length <= MAX_MAP_BYTES && text.includes('[HitObjects]') ? text : null
+      const bytes = Buffer.from(await res.arrayBuffer())
+      return bytes.length > 0 && bytes.length <= MAX_MAP_BYTES ? bytes : null
     } catch {
       return null
     }
@@ -325,16 +312,21 @@ async function findByChecksum(dirs: string[], wanted: string) {
     }
     for (const name of names) {
       if (!name.toLowerCase().endsWith('.osu')) continue
-      try {
-        const file = path.join(dir, name)
-        const info = await stat(file)
-        if (!info.isFile() || info.size > MAX_MAP_BYTES) continue
-        const bytes = await readFile(file)
-        if (md5(bytes) === wanted) return bytes.toString('utf8')
-      } catch {}
+      const bytes = await readMapFile(path.join(dir, name))
+      if (bytes && md5(bytes) === wanted) return bytes.toString('utf8')
     }
   }
   return null
+}
+
+async function readMapFile(file: string) {
+  try {
+    const info = await stat(file)
+    if (!info.isFile() || info.size > MAX_MAP_BYTES) return null
+    return await readFile(file)
+  } catch {
+    return null
+  }
 }
 
 /**
