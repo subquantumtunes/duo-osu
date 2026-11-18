@@ -62,6 +62,11 @@ const session = new HostSession(settings.guestRole, quality(), {
 
 function applyOsu(next: OsuStatus) {
   osu = next
+  if (next.detected && next.detected !== settings.client) {
+    settings.client = next.detected
+    saveSettings()
+    coop.setClient(settings.client)
+  }
   const playing = next.source !== null && next.state === OSU_PLAYING
   playback = { playing, rate: clockRate(next.mods) }
   session.publishSync({ live: playing, mods: next.mods })
