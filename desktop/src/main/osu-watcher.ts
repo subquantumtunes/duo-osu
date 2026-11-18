@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,6 +11,8 @@ const PLAYING = 2
 const MAX_MAP_BYTES = 4_000_000
 const MIN_TIME_INTERVAL_MS = 3
 const RETRY_MS = 3000
+// tosu can report a new map's checksum a few updates before its file path catches up.
+const UNVERIFIED_RETRY_MS = 400
 const SKIN_RETRY_MS = 15_000
 const MAP_FETCH_TIMEOUT_MS = 3000
 /** No images, so the partner page falls back to its own circles for every sprite. */
@@ -35,6 +38,7 @@ export class OsuWatcher {
   private skinRetryAt = 0
   private checksum: string | null = null
   private mapRetryAt = 0
+  private mapVerified = false
   private precise = false
   private lastTimeSent = 0
   private stopped = false
@@ -224,20 +228,26 @@ export class OsuWatcher {
   private async loadMap(checksum: unknown, candidates: (string | null)[]) {
     const files = [...new Set(candidates.filter((file): file is string => !!file && path.isAbsolute(file)))]
     if (typeof checksum !== 'string' || !checksum) return
-    if (checksum === this.checksum && (this.map || performance.now() < this.mapRetryAt)) return
-    this.checksum = checksum
-    this.mapRetryAt = performance.now() + RETRY_MS
+    const now = performance.now()
+    if (checksum === this.checksum && ((this.map && this.mapVerified) || now < this.mapRetryAt)) return
+    if (checksum !== this.checksum) {
+      this.checksum = checksum
+      this.mapVerified = false
+    }
+    this.mapRetryAt = now + RETRY_MS
+    const wanted = checksum.toLowerCase()
+    let fallback: string | null = null
     let lastError: unknown = null
     for (const file of files) {
       try {
         const info = await stat(file)
         if (!info.isFile()) continue
         if (info.size > MAX_MAP_BYTES) throw new Error('file is too large')
-        const text = await readFile(file, 'utf8')
+        const bytes = await readFile(file)
         if (this.checksum !== checksum) return
-        this.map = { checksum, text }
-        this.events.map(this.map)
-        return
+        const text = bytes.toString('utf8')
+        if (md5(bytes) === wanted) return this.acceptMap(checksum, text, true)
+        fallback ??= text
       } catch (err) {
         lastError = err
       }
@@ -245,16 +255,26 @@ export class OsuWatcher {
     if (this.status.source === 'tosu') {
       const text = await this.fetchMapFromTosu()
       if (this.checksum !== checksum) return
-      if (text) {
-        this.map = { checksum, text }
-        this.events.map(this.map)
-        return
-      }
+      if (text && md5(Buffer.from(text, 'utf8')) === wanted) return this.acceptMap(checksum, text, true)
+      fallback ??= text
+    }
+    if (fallback) {
+      // Probably the previous map's file while tosu's paths catch up; use it for now but keep looking.
+      this.acceptMap(checksum, fallback, false)
+      this.mapRetryAt = performance.now() + UNVERIFIED_RETRY_MS
+      return
     }
     console.warn(
       `[osu-coop] Couldn't read the beatmap file (tried ${files.join(', ')}): ${lastError instanceof Error ? lastError.message : (lastError ?? 'not found')}`,
     )
     this.map = null
+  }
+
+  private acceptMap(checksum: string, text: string, verified: boolean) {
+    this.mapVerified = verified
+    if (this.map?.checksum === checksum && this.map.text === text) return
+    this.map = { checksum, text }
+    this.events.map(this.map)
   }
 
   private async fetchMapFromTosu() {
@@ -269,6 +289,10 @@ export class OsuWatcher {
       return null
     }
   }
+}
+
+function md5(bytes: Buffer) {
+  return createHash('md5').update(bytes).digest('hex')
 }
 
 /**
