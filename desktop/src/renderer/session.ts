@@ -8,8 +8,10 @@ import {
   type Role,
   type TapSlot,
   decodeInput,
+  encodeAudioPacket,
   encodeClock,
   makeRoomCode,
+  openAudioChannel,
   openInputChannel,
 } from '@/lib/protocol'
 import type { PartnerStats } from '@/lib/timing'
@@ -143,6 +145,9 @@ export class HostSession {
   private guestId: string | null = null
   private ctrl: DataConnection | null = null
   private input: RTCDataChannel | null = null
+  private audioOut: RTCDataChannel | null = null
+  private audioSeq = 0
+  private directAudio = false
   private lastAimSeq = 0
   private lastKeySeq = 0
   private inputConfirmed = false
@@ -293,6 +298,9 @@ export class HostSession {
       const input = openInputChannel(conn.peerConnection)
       if (input) input.onmessage = (event) => this.handleInput(event)
       this.input = input
+      this.audioOut = openAudioChannel(conn.peerConnection)
+      this.audioSeq = 0
+      if (this.audioOut) this.gameAudio?.setOpusSink((packet) => this.sendOpus(packet))
       conn.send({ t: 'welcome', guestRole: this.guestRole } satisfies HostMessage)
       conn.send({ t: 'sync', ...this.sync } satisfies HostMessage)
       this.sendMap(conn)
@@ -306,8 +314,10 @@ export class HostSession {
       this.callVideo(true, conn.peer)
       // Separate calls keep audio and video in different sync groups, so the video isn't held
       // back to line up with the audio jitter buffer.
+      // Partners that can play the direct Opus packets say so, and the host then drops this call.
       const audio = this.stream.getAudioTracks()
-      this.audioCalls = audio.length > 0 ? [peer.call(conn.peer, new MediaStream(audio))].filter(Boolean) : []
+      this.audioCalls =
+        audio.length > 0 && !this.directAudio ? [peer.call(conn.peer, new MediaStream(audio))].filter(Boolean) : []
       this.setStatus('connected')
     })
     conn.on('close', () => {
@@ -428,6 +438,11 @@ export class HostSession {
     this.stopStats()
     this.audioCalls.forEach((call) => call.close())
     this.audioCalls = []
+    this.gameAudio?.setOpusSink(null)
+    this.audioOut?.close()
+    this.audioOut = null
+    this.audioSeq = 0
+    this.directAudio = false
     this.clearVideoRecall()
     this.dropVideoCall()
     this.videoNote = null
@@ -499,6 +514,12 @@ export class HostSession {
       case 'release':
         this.handlers.onRelease()
         break
+      case 'audio-direct':
+        if (this.directAudio) return
+        this.directAudio = true
+        this.audioCalls.forEach((call) => call.close())
+        this.audioCalls = []
+        break
       case 'video-retry': {
         const now = performance.now()
         if (now - this.lastRetry < RETRY_COOLDOWN_MS) return
@@ -525,6 +546,13 @@ export class HostSession {
         break
       }
     }
+  }
+
+  private sendOpus(packet: Uint8Array) {
+    const out = this.audioOut
+    // A backed-up channel means the link is congested; old sound is worse than a gap.
+    if (out?.readyState !== 'open' || out.bufferedAmount > 4096) return
+    out.send(encodeAudioPacket(++this.audioSeq, performance.now(), packet))
   }
 
   private sendMap(conn: DataConnection) {

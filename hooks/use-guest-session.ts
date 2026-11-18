@@ -13,9 +13,11 @@ import {
   encodeKey,
   encodeProbe,
   minimizePlayoutDelay,
+  openAudioChannel,
   openInputChannel,
   type VideoIssue,
 } from '@/lib/protocol'
+import { DIRECT_PACKET_MS, DirectAudio, directAudioSupported } from '@/lib/direct-audio'
 import { ICE_SERVERS } from '@/lib/browser'
 import { type Beatmap, parseBeatmap } from '@/lib/beatmap'
 import { type Skin, closeSkin, loadSkin } from '@/lib/skin'
@@ -113,7 +115,9 @@ export function useGuestSession(code: string) {
   const skinChunksRef = useRef<{ id: string; parts: string[]; got: number } | null>(null)
   const skinLoadRef = useRef(0)
   const [videoLatency, setVideoLatency] = useState<number | null>(null)
-  const [audio, setAudio] = useState<{ bufferMs: number; latency: number } | null>(null)
+  const [audio, setAudio] = useState<{ bufferMs: number; latency: number; direct: boolean } | null>(null)
+  const directRef = useRef<DirectAudio | null>(null)
+  const audioInRef = useRef<RTCDataChannel | null>(null)
   const audioPcRef = useRef<RTCPeerConnection | null>(null)
   const audioStatsRef = useRef<AudioStatsSample | null>(null)
   const audioLatencyRef = useRef<number | null>(null)
@@ -147,6 +151,9 @@ export function useGuestSession(code: string) {
     inputOk.current = false
     inputRef.current?.close()
     inputRef.current = null
+    audioInRef.current?.close()
+    audioInRef.current = null
+    directRef.current?.reset()
     ctrlRef.current = null
     tracksRef.current = []
     keySeq.current = 0
@@ -206,6 +213,8 @@ export function useGuestSession(code: string) {
     peerRef.current?.destroy()
     peerRef.current = null
     resetLink()
+    directRef.current?.close()
+    directRef.current = null
     setStream(null)
     setRole(null)
     setStatus('ended')
@@ -214,6 +223,20 @@ export function useGuestSession(code: string) {
   const join = useCallback(async () => {
     setError(null)
     setStatus('connecting')
+    // Built before the first await so it starts inside the join click and autoplay allows it.
+    if (!directRef.current && directAudioSupported()) {
+      try {
+        directRef.current = new DirectAudio(() => {
+          // Direct packets are playing, so drop the WebRTC audio track and tell the host to stop it.
+          tracksRef.current = tracksRef.current.filter((t) => t.kind !== 'audio')
+          setStream(new MediaStream(tracksRef.current))
+          audioPcRef.current = null
+          if (ctrlRef.current?.open) ctrlRef.current.send({ t: 'audio-direct' } satisfies GuestMessage)
+        })
+      } catch {
+        directRef.current = null
+      }
+    }
     const { Peer } = await import('peerjs')
     const peer = new Peer({ debug: 1, config: { iceServers: ICE_SERVERS } })
     peerRef.current = peer
@@ -239,6 +262,10 @@ export function useGuestSession(code: string) {
           }
         }
         inputRef.current = input
+        const direct = directRef.current
+        const audioIn = direct ? openAudioChannel(ctrl.peerConnection) : null
+        if (audioIn && direct) audioIn.onmessage = (event) => direct.receive(event.data)
+        audioInRef.current = audioIn
         if (input) {
           if (probeTimer.current) clearInterval(probeTimer.current)
           probeTimer.current = setInterval(() => {
@@ -296,11 +323,13 @@ export function useGuestSession(code: string) {
           videoPcRef.current = call.peerConnection
           videoStatsRef.current = null
         }
-        if (remote.getAudioTracks().length > 0) {
+        const direct = directRef.current?.active ?? false
+        if (remote.getAudioTracks().length > 0 && !direct) {
           audioPcRef.current = call.peerConnection
           audioStatsRef.current = null
         }
-        const incoming = remote.getTracks()
+        const incoming = remote.getTracks().filter((t) => !(direct && t.kind === 'audio'))
+        if (incoming.length === 0) return
         const kept = tracksRef.current.filter(
           (t) => t.readyState === 'live' && !incoming.some((n) => n.kind === t.kind),
         )
@@ -344,7 +373,15 @@ export function useGuestSession(code: string) {
         }
       } catch {}
 
-      try {
+      const direct = directRef.current
+      if (direct?.active) {
+        const rtt = rttRef.current
+        if (rtt !== undefined && direct.bufferMs !== null) {
+          const latency = Math.round(rtt / 2 + direct.bufferMs + DIRECT_PACKET_MS)
+          audioLatencyRef.current = latency
+          setAudio({ bufferMs: Math.round(direct.bufferMs), latency, direct: true })
+        }
+      } else try {
         const sound = await readAudioBuffer(audioPcRef.current, audioStatsRef.current)
         if (sound) {
           audioStatsRef.current = sound.sample
@@ -353,7 +390,7 @@ export function useGuestSession(code: string) {
             const bufferMs = Math.round(sound.bufferMs)
             const latency = Math.round(rtt / 2 + sound.bufferMs + OPUS_FRAME_MS)
             audioLatencyRef.current = latency
-            setAudio({ bufferMs, latency })
+            setAudio({ bufferMs, latency, direct: false })
           }
         }
       } catch {}
@@ -399,7 +436,14 @@ export function useGuestSession(code: string) {
     ctrl.send({ t: 'video-retry' } satisfies GuestMessage)
   }, [])
 
-  useEffect(() => () => peerRef.current?.destroy(), [])
+  useEffect(
+    () => () => {
+      peerRef.current?.destroy()
+      directRef.current?.close()
+      directRef.current = null
+    },
+    [],
+  )
 
   const sendAim = useCallback((x: number, y: number) => {
     const input = inputRef.current

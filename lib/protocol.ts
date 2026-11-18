@@ -6,6 +6,8 @@ export type GuestMessage =
   | { t: 'aim'; s: number; x: number; y: number }
   | { t: 'release' }
   | { t: 'video-retry' }
+  /** The partner is playing the direct Opus packets, so the host can drop the WebRTC audio call. */
+  | { t: 'audio-direct' }
   | {
       t: 'ping'
       ts: number
@@ -110,6 +112,40 @@ export function openInputChannel(pc: RTCPeerConnection | undefined) {
   } catch {
     return null
   }
+}
+
+/**
+ * Game sound as raw Opus packets. WebRTC's audio path packs 20 ms per packet and holds sound in
+ * its own jitter buffer; sending small packets on a lossy channel lets the partner keep a much
+ * smaller buffer. A late packet is useless, so nothing is retransmitted.
+ */
+export function openAudioChannel(pc: RTCPeerConnection | undefined) {
+  if (!pc) return null
+  try {
+    const channel = pc.createDataChannel('audio', { negotiated: true, id: 1001, ordered: false, maxRetransmits: 0 })
+    channel.binaryType = 'arraybuffer'
+    return channel
+  } catch {
+    return null
+  }
+}
+
+const AUDIO_HEADER = 8
+
+/** `sentMs` is the host's clock when the packet left; only differences between packets matter. */
+export function encodeAudioPacket(seq: number, sentMs: number, opus: Uint8Array) {
+  const out = new Uint8Array(AUDIO_HEADER + opus.byteLength)
+  const view = new DataView(out.buffer)
+  view.setUint32(0, seq >>> 0)
+  view.setUint32(4, Math.round(sentMs * 10) >>> 0)
+  out.set(opus, AUDIO_HEADER)
+  return out
+}
+
+export function decodeAudioPacket(data: unknown) {
+  if (!(data instanceof ArrayBuffer) || data.byteLength <= AUDIO_HEADER) return null
+  const view = new DataView(data)
+  return { seq: view.getUint32(0), sentMs: view.getUint32(4) / 10, opus: new Uint8Array(data, AUDIO_HEADER) }
 }
 
 const PACKET_AIM = 1

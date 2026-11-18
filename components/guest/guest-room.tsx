@@ -150,7 +150,7 @@ function PlayfieldStatus({
   preferVideo: boolean
   onToggle: () => void
   videoLatency: number | null
-  audio: { bufferMs: number; latency: number } | null
+  audio: { bufferMs: number; latency: number; direct: boolean } | null
 }) {
   const local = ready && !preferVideo
   return (
@@ -175,6 +175,10 @@ function PlayfieldStatus({
         <div className="flex flex-col">
           <dt className="text-muted-foreground">Audio buffer</dt>
           <dd>{audio ? `${audio.bufferMs} ms` : '—'}</dd>
+        </div>
+        <div className="flex flex-col">
+          <dt className="text-muted-foreground">Audio path</dt>
+          <dd>{audio ? (audio.direct ? 'Direct' : 'WebRTC') : '—'}</dd>
         </div>
       </dl>
       {ready && (
