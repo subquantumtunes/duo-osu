@@ -29,7 +29,42 @@ export type HostMessage =
   | { t: 'map'; id: string; i: number; n: number; d: string }
   | { t: 'skin'; id: string; i: number; n: number; d: string }
 
-export const MAP_CHUNK_CHARS = 16_000
+/**
+ * Browsers deliver at most 16 KiB per data channel message, and JSON escaping (every CRLF in an
+ * .osu file becomes four characters) can push a chunk well past its character count, so chunks
+ * are sized by their encoded bytes. The budget leaves room for the message's other fields.
+ */
+const CHUNK_BYTES = 12_000
+
+export function chunkText(text: string): string[] {
+  const chunks: string[] = []
+  let start = 0
+  let bytes = 0
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    const pair = code >= 0xd800 && code <= 0xdbff && i + 1 < text.length && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00
+    const cost = encodedBytes(code, pair)
+    if (bytes + cost > CHUNK_BYTES && i > start) {
+      chunks.push(text.slice(start, i))
+      start = i
+      bytes = 0
+    }
+    bytes += cost
+    if (pair) i++
+  }
+  chunks.push(text.slice(start))
+  return chunks
+}
+
+/** UTF-8 bytes this UTF-16 unit (or surrogate pair) takes inside a JSON string. */
+function encodedBytes(code: number, pair: boolean) {
+  if (pair) return 4
+  if (code === 0x22 || code === 0x5c || code === 0x0a || code === 0x0d || code === 0x09 || code === 0x08 || code === 0x0c) return 2
+  if (code < 0x20 || (code >= 0xd800 && code <= 0xdfff)) return 6
+  if (code < 0x80) return 1
+  if (code < 0x800) return 2
+  return 3
+}
 
 export const ROOM_PREFIX = 'osu-coop-v1-'
 export const DEFAULT_BRIDGE_PORT = 7273

@@ -3,7 +3,7 @@ import { ICE_SERVERS } from '@/lib/browser'
 import {
   type GuestMessage,
   type HostMessage,
-  MAP_CHUNK_CHARS,
+  chunkText,
   ROOM_PREFIX,
   type Role,
   type TapSlot,
@@ -529,21 +529,15 @@ export class HostSession {
   private sendMap(conn: DataConnection) {
     const map = this.map
     if (!map) return
-    const n = Math.max(1, Math.ceil(map.text.length / MAP_CHUNK_CHARS))
-    for (let i = 0; i < n; i++) {
-      const d = map.text.slice(i * MAP_CHUNK_CHARS, (i + 1) * MAP_CHUNK_CHARS)
-      conn.send({ t: 'map', id: map.checksum, i, n, d } satisfies HostMessage)
-    }
+    const chunks = chunkText(map.text)
+    chunks.forEach((d, i) => conn.send({ t: 'map', id: map.checksum, i, n: chunks.length, d } satisfies HostMessage))
   }
 
   private sendSkin(conn: DataConnection) {
     const skin = this.skin
     if (!skin) return
-    const n = Math.max(1, Math.ceil(skin.text.length / MAP_CHUNK_CHARS))
-    for (let i = 0; i < n; i++) {
-      const d = skin.text.slice(i * MAP_CHUNK_CHARS, (i + 1) * MAP_CHUNK_CHARS)
-      conn.send({ t: 'skin', id: skin.id, i, n, d } satisfies HostMessage)
-    }
+    const chunks = chunkText(skin.text)
+    chunks.forEach((d, i) => conn.send({ t: 'skin', id: skin.id, i, n: chunks.length, d } satisfies HostMessage))
   }
 
   private startStats() {
