@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   type DesktopCapturerSource,
   desktopCapturer,
+  dialog,
   ipcMain,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
@@ -17,6 +18,7 @@ import { IPC, type ScreenSource } from '../shared/api'
 import { GameAudio } from './game-audio'
 import { createInjector } from './input'
 import { OsuWatcher } from './osu-watcher'
+import { TosuManager } from './tosu'
 
 const TOSU_PORT = 24050
 
@@ -35,6 +37,7 @@ if (!app.requestSingleInstanceLock()) app.quit()
 let win: BrowserWindow | null = null
 let sources: DesktopCapturerSource[] = []
 let selected: DesktopCapturerSource | null = null
+let tosu: TosuManager | null = null
 const injector = createInjector()
 
 const watcher = new OsuWatcher(TOSU_PORT, {
@@ -199,6 +202,23 @@ app.whenReady().then(() => {
   registerIpc()
   createWindow()
   watcher.start()
+
+  tosu = new TosuManager(TOSU_PORT, path.join(app.getPath('userData'), 'tosu'), (message) =>
+    win?.setTitle(`osu! co-op host — ${message}`),
+  )
+  tosu
+    .ensure()
+    .then(() => win?.setTitle('osu! co-op host'))
+    .catch((error: unknown) => {
+      win?.setTitle('osu! co-op host')
+      const detail = error instanceof Error ? error.message : String(error)
+      void dialog.showMessageBox({
+        type: 'warning',
+        title: 'tosu',
+        message: 'dosu could not start tosu automatically.',
+        detail: `${detail}\n\nYou can download tosu from github.com/tosuapp/tosu and run it yourself.`,
+      })
+    })
 })
 
 app.on('second-instance', () => {
@@ -210,6 +230,7 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => app.quit())
 
 app.on('will-quit', () => {
+  tosu?.stop()
   watcher.stop()
   injector.dispose()
 })
