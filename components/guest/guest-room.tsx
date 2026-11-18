@@ -8,7 +8,9 @@ import { SiteHeader } from '@/components/site-header'
 import { StatusBadge, pingTone } from '@/components/status-badge'
 import { KeyCapture } from '@/components/key-capture'
 import { useGuestSession } from '@/hooks/use-guest-session'
+import { useCursorSettings } from '@/lib/cursor-settings'
 import { GuestStage } from './guest-stage'
+import { CursorSettingsPanel } from './cursor-settings'
 
 export function GuestRoom({ code }: { code: string }) {
   const session = useGuestSession(code)
@@ -17,6 +19,7 @@ export function GuestRoom({ code }: { code: string }) {
   const connected = session.status === 'connected'
   const [preferVideo, setPreferVideo] = useState(false)
   const leadMsRef = useRef(0)
+  const [cursorStyle, updateCursorStyle] = useCursorSettings()
   // Older hosts don't say which map is live, so only check it when they do.
   const mapIsCurrent = session.sync?.map === undefined || session.sync.map === session.map?.checksum
   const playfieldReady = Boolean(session.map && session.sync?.live && mapIsCurrent)
@@ -89,6 +92,7 @@ export function GuestRoom({ code }: { code: string }) {
               sendKey={session.sendKey}
               videoIssue={session.videoIssue}
               onRetryVideo={session.retryVideo}
+              cursorStyle={cursorStyle}
               playfield={
                 usePlayfield && session.map
                   ? {
@@ -108,7 +112,15 @@ export function GuestRoom({ code }: { code: string }) {
               preferVideo={preferVideo}
               onToggle={() => setPreferVideo((v) => !v)}
               videoLatency={session.videoLatency}
+              audio={session.audio}
             />
+            {session.role === 'aim' && (
+              <CursorSettingsPanel
+                settings={cursorStyle}
+                onChange={updateCursorStyle}
+                skinHasCursor={Boolean(session.skin?.cursor)}
+              />
+            )}
           </>
         ) : (
           <JoinCard
@@ -130,6 +142,7 @@ function PlayfieldStatus({
   preferVideo,
   onToggle,
   videoLatency,
+  audio,
 }: {
   ready: boolean
   loading: boolean
@@ -137,6 +150,7 @@ function PlayfieldStatus({
   preferVideo: boolean
   onToggle: () => void
   videoLatency: number | null
+  audio: { bufferMs: number; latency: number } | null
 }) {
   const local = ready && !preferVideo
   return (
@@ -153,6 +167,16 @@ function PlayfieldStatus({
               : `Waiting for the host to start a map with tosu running.${videoLatency !== null ? ` Stream delay ${videoLatency} ms.` : ''}`}
         </span>
       </div>
+      <dl className="flex gap-4 font-mono text-xs">
+        <div className="flex flex-col">
+          <dt className="text-muted-foreground">Audio delay</dt>
+          <dd>{audio ? `~${audio.latency} ms` : '—'}</dd>
+        </div>
+        <div className="flex flex-col">
+          <dt className="text-muted-foreground">Audio buffer</dt>
+          <dd>{audio ? `${audio.bufferMs} ms` : '—'}</dd>
+        </div>
+      </dl>
       {ready && (
         <Button variant="outline" size="sm" onClick={onToggle}>
           {preferVideo ? 'Use local playback' : 'Use stream only'}

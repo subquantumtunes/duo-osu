@@ -239,6 +239,7 @@ function render() {
         : '-'
   $('stat-ping').textContent = session.rtt !== null ? `${session.rtt} ms` : '-'
   $('stat-delay').textContent = session.partner?.video != null ? `${session.partner.video} ms` : '-'
+  $('stat-audio').textContent = session.partner?.audio != null ? `${session.partner.audio} ms` : '-'
   $('stat-mode').textContent = session.partner ? (session.partner.mode === 'playfield' ? 'Local map' : 'Stream') : '-'
 
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-client]')) {

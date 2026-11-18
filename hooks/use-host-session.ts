@@ -238,6 +238,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         setPartner((prev) => ({
           rtt: typeof msg.rtt === 'number' ? msg.rtt : (prev?.rtt ?? 0),
           video: typeof msg.video === 'number' ? msg.video : null,
+          audio: typeof msg.audio === 'number' ? msg.audio : null,
           mode: msg.mode === 'playfield' ? 'playfield' : 'video',
           videoState,
         }))

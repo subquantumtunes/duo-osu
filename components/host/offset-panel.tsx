@@ -59,6 +59,7 @@ function Recommendation({ partner, osu, guestRole }: { partner: PartnerStats; os
         <Stat label="Ping" value={`${partner.rtt} ms`} />
         <Stat label="Partner sees" value={playfield ? 'Local map' : 'Stream'} />
         <Stat label="Stream delay" value={partner.video !== null ? `${partner.video} ms` : '—'} />
+        <Stat label="Audio delay" value={partner.audio != null ? `${partner.audio} ms` : '—'} />
         <Stat label="Their input lands" value={playfield ? 'On time' : `${Math.round(lag)} ms late`} />
       </dl>
       {guestRole === 'aim' ? (

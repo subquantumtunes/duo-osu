@@ -4,6 +4,7 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
 import type { Beatmap } from '@/lib/beatmap'
 import type { Skin } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
+import type { CursorSettings } from '@/lib/cursor-settings'
 import { Playfield } from './playfield'
 import { Maximize, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -48,7 +49,9 @@ export function GuestStage({
   playfield,
   videoIssue,
   onRetryVideo,
+  cursorStyle,
 }: {
+  cursorStyle: CursorSettings
   videoIssue: VideoIssue | null
   onRetryVideo: () => void
   stream: MediaStream | null
@@ -65,6 +68,8 @@ export function GuestStage({
   const [pressed, setPressed] = useState({ k1: false, k2: false })
   const held = useRef<Record<TapSlot, Set<Source>>>({ k1: new Set(), k2: new Set() })
   const cursorRef = useRef<{ x: number; y: number } | null>(null)
+  const cursorStyleRef = useRef<CursorSettings>(cursorStyle)
+  cursorStyleRef.current = cursorStyle
 
   // Audio plays through its own element: the video element is re-attached whenever the video
   // call restarts, and keeping it muted means autoplay rules can never pause the picture.
@@ -219,7 +224,12 @@ export function GuestStage({
           className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-10')}
         />
         {playfield && (
-          <Playfield {...playfield} videoRef={videoRef} cursorRef={role === 'aim' ? cursorRef : undefined} />
+          <Playfield
+            {...playfield}
+            videoRef={videoRef}
+            cursorRef={role === 'aim' ? cursorRef : undefined}
+            cursorStyleRef={cursorStyleRef}
+          />
         )}
         {!playfield && videoIssue && videoIssue !== 'connecting' ? (
           <VideoIssueOverlay issue={videoIssue} onRetry={onRetryVideo} />

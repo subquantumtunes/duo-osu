@@ -53,6 +53,28 @@ async function readVideoStats(pc: RTCPeerConnection | null, prev: VideoStatsSamp
   return { sample: now, receiveMs: frames > 0 ? bufferMs + decodeMs : null, frames: now.frames, bytes }
 }
 
+// Opus packs 20 ms of sound per packet, so the host waits that long before sending each one.
+const OPUS_FRAME_MS = 20
+
+type AudioStatsSample = { delay: number; emitted: number }
+
+/** How long the browser held received sound before playing it, averaged since the last sample. */
+async function readAudioBuffer(pc: RTCPeerConnection | null, prev: AudioStatsSample | null) {
+  if (!pc) return null
+  const report = await pc.getStats()
+  let now: AudioStatsSample | null = null
+  report.forEach((s) => {
+    if (s.type === 'inbound-rtp' && s.kind === 'audio') {
+      now = { delay: s.jitterBufferDelay ?? 0, emitted: s.jitterBufferEmittedCount ?? 0 }
+    }
+  })
+  if (!now) return null
+  const sample: AudioStatsSample = now
+  const base = prev ?? { delay: 0, emitted: 0 }
+  const emitted = sample.emitted - base.emitted
+  return { sample, bufferMs: emitted > 0 ? ((sample.delay - base.delay) / emitted) * 1000 : null }
+}
+
 // How long a fresh video call gets to show its first frame before it's treated as stuck.
 const FIRST_FRAME_MS = 6000
 const AUTO_RETRIES = 2
@@ -91,6 +113,10 @@ export function useGuestSession(code: string) {
   const skinChunksRef = useRef<{ id: string; parts: string[]; got: number } | null>(null)
   const skinLoadRef = useRef(0)
   const [videoLatency, setVideoLatency] = useState<number | null>(null)
+  const [audio, setAudio] = useState<{ bufferMs: number; latency: number } | null>(null)
+  const audioPcRef = useRef<RTCPeerConnection | null>(null)
+  const audioStatsRef = useRef<AudioStatsSample | null>(null)
+  const audioLatencyRef = useRef<number | null>(null)
   const [videoIssue, setVideoIssue] = useState<VideoIssue | null>('connecting')
   const videoIssueRef = useRef<VideoIssue | null>('connecting')
   const videoSinceRef = useRef(0)
@@ -128,6 +154,10 @@ export function useGuestSession(code: string) {
     chunksRef.current = null
     videoPcRef.current = null
     videoStatsRef.current = null
+    audioPcRef.current = null
+    audioStatsRef.current = null
+    audioLatencyRef.current = null
+    setAudio(null)
     hostVideoRef.current = null
     retriesRef.current = 0
     videoIssueRef.current = 'connecting'
@@ -266,6 +296,10 @@ export function useGuestSession(code: string) {
           videoPcRef.current = call.peerConnection
           videoStatsRef.current = null
         }
+        if (remote.getAudioTracks().length > 0) {
+          audioPcRef.current = call.peerConnection
+          audioStatsRef.current = null
+        }
         const incoming = remote.getTracks()
         const kept = tracksRef.current.filter(
           (t) => t.readyState === 'live' && !incoming.some((n) => n.kind === t.kind),
@@ -275,6 +309,7 @@ export function useGuestSession(code: string) {
       })
       call.on('close', () => {
         if (videoPcRef.current === call.peerConnection) videoPcRef.current = null
+        if (audioPcRef.current === call.peerConnection) audioPcRef.current = null
       })
     })
 
@@ -309,6 +344,20 @@ export function useGuestSession(code: string) {
         }
       } catch {}
 
+      try {
+        const sound = await readAudioBuffer(audioPcRef.current, audioStatsRef.current)
+        if (sound) {
+          audioStatsRef.current = sound.sample
+          const rtt = rttRef.current
+          if (rtt !== undefined && sound.bufferMs !== null) {
+            const bufferMs = Math.round(sound.bufferMs)
+            const latency = Math.round(rtt / 2 + sound.bufferMs + OPUS_FRAME_MS)
+            audioLatencyRef.current = latency
+            setAudio({ bufferMs, latency })
+          }
+        }
+      } catch {}
+
       const now = performance.now()
       const issue = diagnose(pc, frames, bytes, hostVideoRef.current, now - videoSinceRef.current)
       if (issue === null) retriesRef.current = 0
@@ -327,6 +376,7 @@ export function useGuestSession(code: string) {
         ts: now,
         rtt: rttRef.current,
         video: videoLatencyRef.current,
+        audio: audioLatencyRef.current,
         mode: modeRef.current,
         vs: issue ?? 'ok',
       } satisfies GuestMessage)
@@ -387,6 +437,7 @@ export function useGuestSession(code: string) {
     mapLoading,
     skin,
     videoLatency,
+    audio,
     videoIssue,
     retryVideo,
     clockRef,

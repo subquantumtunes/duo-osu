@@ -11,6 +11,8 @@ export type GuestMessage =
       ts: number
       rtt?: number
       video?: number | null
+      /** Estimated time from the host's game sound to the partner's speakers. */
+      audio?: number | null
       mode?: 'playfield' | 'video'
       vs?: VideoIssue | 'ok'
     }

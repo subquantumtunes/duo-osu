@@ -4,6 +4,8 @@ export type PartnerStats = {
   rtt: number
   /** Time from a frame leaving the host's screen to it showing on the partner's screen. */
   video: number | null
+  /** Estimated time from the host's game sound to the partner's speakers. */
+  audio?: number | null
   mode: PartnerMode
   /** What the partner's video looks like: 'ok', or the reason it's blank. */
   videoState: 'ok' | 'connecting' | 'network' | 'host-capture' | 'decode'

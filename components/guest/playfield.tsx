@@ -4,6 +4,7 @@ import { type RefObject, useEffect, useRef } from 'react'
 import { type Beatmap, type HitObject, difficultyFor, sliderBallAt } from '@/lib/beatmap'
 import type { Skin, SkinSprite } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
+import { type CursorSettings, DEFAULT_CURSOR, cursorColor } from '@/lib/cursor-settings'
 
 const COMBO_COLORS = ['#ff66aa', '#66ccff', '#ffcc33', '#99ee77']
 const FADE_OUT_MS = 150
@@ -160,20 +161,51 @@ function drawSliderBody(
   blit(alpha)
 }
 
+/** Circle radius at CS 4, the size adaptive cursors are tuned for. */
+const CS4_RADIUS = 54.4 - 4.48 * 4
+const TRAIL_MS = 120
+
+type TrailPoint = { x: number; y: number; t: number }
+
 /** osu! sizes cursor art for a 768px-tall screen. */
-function drawCursor(ctx: Ctx, skin: Skin | null, x: number, y: number, fieldScale: number) {
-  const unit = (fieldScale * 480) / 768
-  if (skin?.cursor) {
+function drawCursor(
+  ctx: Ctx,
+  skin: Skin | null,
+  style: CursorSettings,
+  x: number,
+  y: number,
+  unit: number,
+) {
+  if (style.useSkin && skin?.cursor) {
     drawSprite(ctx, skin.cursor, skin.cursor.hd, x, y, unit)
     return
   }
   ctx.beginPath()
   ctx.arc(x, y, 18 * unit, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(255, 204, 51, 0.35)'
+  ctx.fillStyle = `hsl(${style.hue} 100% 60% / 0.35)`
   ctx.fill()
   ctx.lineWidth = Math.max(2, 4 * unit)
-  ctx.strokeStyle = '#ffcc33'
+  ctx.strokeStyle = cursorColor(style.hue)
   ctx.stroke()
+}
+
+function drawTrail(ctx: Ctx, trail: TrailPoint[], now: number, hue: number, unit: number) {
+  if (trail.length < 2) return
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (let i = 1; i < trail.length; i++) {
+    const age = (now - trail[i].t) / TRAIL_MS
+    if (age >= 1) continue
+    const fade = 1 - age
+    ctx.beginPath()
+    ctx.moveTo(trail[i - 1].x, trail[i - 1].y)
+    ctx.lineTo(trail[i].x, trail[i].y)
+    ctx.strokeStyle = `hsl(${hue} 100% 60% / ${0.6 * fade})`
+    ctx.lineWidth = Math.max(1.5, 14 * unit * fade)
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 type Rect = { left: number; top: number; width: number; height: number }
@@ -207,9 +239,12 @@ export function Playfield({
   videoRef,
   skin = null,
   cursorRef,
+  cursorStyleRef,
 }: {
   /** The partner's own aim, 0..1 across the video, drawn above the notes. */
   cursorRef?: RefObject<{ x: number; y: number } | null>
+  /** Read every frame, so changing the look never restarts the drawing loop. */
+  cursorStyleRef?: RefObject<CursorSettings>
   /** The host's osu! skin; any missing piece falls back to the built-in drawing. */
   skin?: Skin | null
   map: Beatmap
@@ -231,6 +266,7 @@ export function Playfield({
     const tint = makeTinter()
     const sliderLayer = document.createElement('canvas')
     const firstObject = map.objects.find((o) => o.kind !== 'spinner')
+    const trail: TrailPoint[] = []
     let frame = 0
 
     const draw = () => {
@@ -396,14 +432,27 @@ export function Playfield({
       }
       ctx.globalAlpha = 1
       const aim = cursorRef?.current
-      if (aim) {
-        drawCursor(ctx, skin, content.left + aim.x * content.width, content.top + aim.y * content.height, field.scale)
+      const now = performance.now()
+      if (!aim) {
+        trail.length = 0
+        return
       }
+      const style = cursorStyleRef?.current ?? DEFAULT_CURSOR
+      const adaptive = style.adaptive ? diff.radius / CS4_RADIUS : 1
+      const cursorUnit = ((field.scale * 480) / 768) * style.size * adaptive
+      const ax = content.left + aim.x * content.width
+      const ay = content.top + aim.y * content.height
+      const last = trail[trail.length - 1]
+      if (!last || last.x !== ax || last.y !== ay) trail.push({ x: ax, y: ay, t: now })
+      else last.t = now
+      while (trail.length > 0 && now - trail[0].t > TRAIL_MS) trail.shift()
+      if (style.trail) drawTrail(ctx, trail, now, style.hue, cursorUnit)
+      drawCursor(ctx, skin, style, ax, ay, cursorUnit)
     }
 
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [map, mods, clockRef, leadMsRef, videoRef, skin, cursorRef])
+  }, [map, mods, clockRef, leadMsRef, videoRef, skin, cursorRef, cursorStyleRef])
 
   return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 size-full" />
 }
