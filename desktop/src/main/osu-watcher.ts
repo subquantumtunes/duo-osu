@@ -30,7 +30,16 @@ type Json = Record<string, any>
 
 /** Follows osu! stable or lazer through tosu (or stable through gosumemory) so the partner can draw the map locally. */
 export class OsuWatcher {
-  status: OsuStatus = { source: null, client: 'stable', detected: null, state: null, mods: 0, offset: null }
+  status: OsuStatus = {
+    source: null,
+    client: 'stable',
+    detected: null,
+    state: null,
+    mods: 0,
+    offset: null,
+    checksum: null,
+    mapReady: false,
+  }
   map: OsuMap | null = null
   skin: OsuSkin | null = null
   private lazerFiles: string | null = null
@@ -62,7 +71,7 @@ export class OsuWatcher {
    */
   setClient(client: GameClient) {
     if (client === this.status.client && (client === 'stable' || this.skin === BUILT_IN_SKIN)) return
-    this.set({ client })
+    this.set({ client, checksum: null, mapReady: false })
     this.checksum = null
     this.map = null
     if (client === 'lazer') {
@@ -236,6 +245,7 @@ export class OsuWatcher {
       this.checksum = checksum
       this.mapVerified = false
       this.mapWarned = false
+      this.set({ checksum, mapReady: this.map?.checksum === checksum })
     }
     this.mapLoading = true
     try {
@@ -243,9 +253,12 @@ export class OsuWatcher {
       if (this.checksum !== checksum) return
       if (text !== null) {
         this.mapVerified = true
-        if (this.map?.checksum === checksum && this.map.text === text) return
-        this.map = { checksum, text }
-        this.events.map(this.map)
+        if (this.map?.checksum !== checksum || this.map.text !== text) {
+          this.map = { checksum, text }
+          this.events.map(this.map)
+        }
+        // Sent after the map itself so the partner already has the file when it's told to draw it.
+        this.set({ mapReady: true })
         return
       }
       // tosu's file path often lags behind the checksum for a few updates after a map change, so

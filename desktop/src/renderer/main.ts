@@ -38,7 +38,16 @@ const coop = window.coop
 
 let screens: ScreenSource[] = []
 let inputStatus: InputStatus = { native: false, reason: null }
-let osu: OsuStatus = { source: null, client: settings.client, detected: null, state: null, mods: 0, offset: null }
+let osu: OsuStatus = {
+  source: null,
+  client: settings.client,
+  detected: null,
+  state: null,
+  mods: 0,
+  offset: null,
+  checksum: null,
+  mapReady: false,
+}
 let keys = { k1: false, k2: false }
 let listening: TapSlot | null = null
 let playback = { playing: false, rate: 1 }
@@ -69,7 +78,9 @@ function applyOsu(next: OsuStatus) {
   }
   const playing = next.source !== null && next.state === OSU_PLAYING
   playback = { playing, rate: clockRate(next.mods) }
-  session.publishSync({ live: playing, mods: next.mods })
+  // Until the exact file is found the partner has no matching map, so it follows the stream
+  // instead of drawing whatever map it received last.
+  session.publishSync({ live: playing, mods: next.mods, map: next.mapReady ? next.checksum : null })
   render()
 }
 
@@ -234,9 +245,12 @@ function render() {
     button.setAttribute('aria-checked', String(button.dataset.client === settings.client))
   }
   const mismatch = osu.detected !== null && osu.detected !== settings.client
+  const waitingForMap = osu.source !== null && osu.checksum !== null && !osu.mapReady
   $('client-hint').textContent = mismatch
     ? `tosu says osu! ${osu.detected} is running. Switch to ${osu.detected === 'lazer' ? 'Lazer' : 'Stable'} so your partner gets the map.`
-    : settings.client === 'lazer'
+    : waitingForMap
+      ? 'Waiting for the beatmap file of the selected difficulty. Your partner follows the stream until it is found.'
+      : settings.client === 'lazer'
       ? 'Your partner sees the co-op site’s own circles. Lazer skins can’t be read from outside the game.'
       : 'Your partner sees the circles from the skin you have selected in osu!.'
   $('client-hint').toggleAttribute('data-warn', mismatch)

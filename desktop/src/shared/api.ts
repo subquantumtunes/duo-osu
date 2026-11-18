@@ -20,6 +20,9 @@ export type OsuStatus = {
   state: number | null
   mods: number
   offset: number | null
+  /** The map osu! reports right now, and whether its exact .osu file has been found. */
+  checksum: string | null
+  mapReady: boolean
 }
 
 export type OsuMap = { checksum: string; text: string }

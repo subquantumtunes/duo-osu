@@ -128,7 +128,7 @@ export class HostSession {
   encoder: EncoderStats | null = null
 
   private gameAudio: ReturnType<typeof createGameAudioTrack> = null
-  private sync = { live: false, mods: 0 }
+  private sync: { live: boolean; mods: number; map: string | null } = { live: false, mods: 0, map: null }
   private map: { checksum: string; text: string } | null = null
   private skin: { id: string; text: string } | null = null
   private clockSeq = 0
@@ -239,8 +239,8 @@ export class HostSession {
     this.setStatus('idle')
   }
 
-  publishSync(next: { live: boolean; mods: number }) {
-    if (this.sync.live === next.live && this.sync.mods === next.mods) return
+  publishSync(next: { live: boolean; mods: number; map: string | null }) {
+    if (this.sync.live === next.live && this.sync.mods === next.mods && this.sync.map === next.map) return
     this.sync = next
     if (this.ctrl?.open) this.ctrl.send({ t: 'sync', ...next } satisfies HostMessage)
   }

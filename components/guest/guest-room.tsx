@@ -17,7 +17,9 @@ export function GuestRoom({ code }: { code: string }) {
   const connected = session.status === 'connected'
   const [preferVideo, setPreferVideo] = useState(false)
   const leadMsRef = useRef(0)
-  const playfieldReady = Boolean(session.map && session.sync?.live)
+  // Older hosts don't say which map is live, so only check it when they do.
+  const mapIsCurrent = session.sync?.map === undefined || session.sync.map === session.map?.checksum
+  const playfieldReady = Boolean(session.map && session.sync?.live && mapIsCurrent)
   const usePlayfield = playfieldReady && !preferVideo
   const { setMode, transitRef } = session
 

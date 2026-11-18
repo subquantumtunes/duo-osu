@@ -24,7 +24,8 @@ export type HostMessage =
   | { t: 'host-video'; frames: number; live: boolean }
   | { t: 'full' }
   | { t: 'input-ok' }
-  | { t: 'sync'; live: boolean; mods: number }
+  /** `map` is the checksum of the map osu! is on; older hosts leave it out. */
+  | { t: 'sync'; live: boolean; mods: number; map?: string | null }
   | { t: 'map'; id: string; i: number; n: number; d: string }
   | { t: 'skin'; id: string; i: number; n: number; d: string }
 
