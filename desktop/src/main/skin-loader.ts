@@ -11,6 +11,8 @@ const SPRITES: [string, string][] = [
   ['hitcircleoverlay', 'hitcircleoverlay'],
   ['approachcircle', 'approachcircle'],
   ['sliderb', 'sliderb0'],
+  ['reversearrow', 'reversearrow'],
+  ['cursor', 'cursor'],
 ]
 
 async function get(url: string, max: number) {

@@ -24,6 +24,7 @@ export type Beatmap = {
 }
 
 export const MOD_EASY = 2
+export const MOD_HIDDEN = 8
 export const MOD_HARD_ROCK = 16
 export const MOD_DOUBLE_TIME = 64
 export const MOD_HALF_TIME = 256
@@ -50,6 +51,7 @@ export function difficultyFor(map: Beatmap, mods: number) {
     preempt,
     fadeIn: 400 * Math.min(1, preempt / 450),
     flipY: (mods & MOD_HARD_ROCK) !== 0,
+    hidden: (mods & MOD_HIDDEN) !== 0,
   }
 }
 

@@ -63,6 +63,7 @@ export function GuestStage({
   const [needsUnmute, setNeedsUnmute] = useState(false)
   const [pressed, setPressed] = useState({ k1: false, k2: false })
   const held = useRef<Record<TapSlot, Set<Source>>>({ k1: new Set(), k2: new Set() })
+  const cursorRef = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     const video = videoRef.current
@@ -125,10 +126,21 @@ export function GuestStage({
       const { clientX, clientY } = e as PointerEvent
       const r = videoContentRect(video)
       if (r.width === 0) return
-      sendAim(clamp01((clientX - r.left) / r.width), clamp01((clientY - r.top) / r.height))
+      const x = clamp01((clientX - r.left) / r.width)
+      const y = clamp01((clientY - r.top) / r.height)
+      cursorRef.current = { x, y }
+      sendAim(x, y)
+    }
+    const onLeave = () => {
+      cursorRef.current = null
     }
     stage.addEventListener(eventName, onMove)
-    return () => stage.removeEventListener(eventName, onMove)
+    stage.addEventListener('pointerleave', onLeave)
+    return () => {
+      stage.removeEventListener(eventName, onMove)
+      stage.removeEventListener('pointerleave', onLeave)
+      cursorRef.current = null
+    }
   }, [role, sendAim])
 
   useEffect(() => {
@@ -183,7 +195,7 @@ export function GuestStage({
         }}
         className={cn(
           'relative flex min-h-72 flex-1 items-center justify-center overflow-hidden rounded-2xl border border-border bg-black outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50',
-          role === 'aim' ? 'cursor-crosshair' : 'cursor-default',
+          role === 'aim' ? (playfield ? 'cursor-none' : 'cursor-crosshair') : 'cursor-default',
         )}
       >
         <video
@@ -192,7 +204,9 @@ export function GuestStage({
           playsInline
           className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-10')}
         />
-        {playfield && <Playfield {...playfield} videoRef={videoRef} />}
+        {playfield && (
+          <Playfield {...playfield} videoRef={videoRef} cursorRef={role === 'aim' ? cursorRef : undefined} />
+        )}
         {!playfield && videoIssue && videoIssue !== 'connecting' ? (
           <VideoIssueOverlay issue={videoIssue} onRetry={onRetryVideo} />
         ) : (
