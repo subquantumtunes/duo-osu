@@ -7,7 +7,7 @@ import {
   type HostMessage,
   type Role,
   type TapSlot,
-  MAP_CHUNK_CHARS,
+  chunkText,
   ROOM_PREFIX,
   decodeInput,
   encodeClock,
@@ -367,11 +367,8 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
   function sendMap(conn: DataConnection) {
     const map = mapRef.current
     if (!map) return
-    const n = Math.max(1, Math.ceil(map.text.length / MAP_CHUNK_CHARS))
-    for (let i = 0; i < n; i++) {
-      const d = map.text.slice(i * MAP_CHUNK_CHARS, (i + 1) * MAP_CHUNK_CHARS)
-      conn.send({ t: 'map', id: map.checksum, i, n, d } satisfies HostMessage)
-    }
+    const chunks = chunkText(map.text)
+    chunks.forEach((d, i) => conn.send({ t: 'map', id: map.checksum, i, n: chunks.length, d } satisfies HostMessage))
   }
 
   return {
