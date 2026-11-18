@@ -9,9 +9,14 @@ export type ScreenSource = {
   thumbnail: string
 }
 
+export type GameClient = 'stable' | 'lazer'
+
 export type OsuStatus = {
   source: 'tosu' | 'gosumemory' | null
-  client: 'stable' | 'lazer' | null
+  /** The client picked in the host app. */
+  client: GameClient
+  /** The client tosu reports, used to warn when it doesn't match the pick. */
+  detected: GameClient | null
   state: number | null
   mods: number
   offset: number | null
@@ -32,6 +37,7 @@ export type CoopApi = {
   inputStatus(): Promise<InputStatus>
   osuSnapshot(): Promise<{ status: OsuStatus; map: OsuMap | null; skin: OsuSkin | null }>
   setBindings(k1: string, k2: string): Promise<boolean>
+  setClient(client: GameClient): void
   aim(x: number, y: number): void
   key(slot: TapSlot, down: boolean): void
   release(): void
@@ -51,6 +57,7 @@ export const IPC = {
   inputStatus: 'coop:input-status',
   osuSnapshot: 'coop:osu-snapshot',
   setBindings: 'coop:set-bindings',
+  setClient: 'coop:set-client',
   aim: 'coop:aim',
   key: 'coop:key',
   release: 'coop:release',

@@ -1,8 +1,9 @@
 import { readFile, stat } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import WebSocket from 'ws'
-import type { OsuMap, OsuSkin, OsuStatus } from '../shared/api'
+import type { GameClient, OsuMap, OsuSkin, OsuStatus } from '../shared/api'
 import { fetchSkin } from './skin-loader'
 
 const PLAYING = 2
@@ -11,6 +12,8 @@ const MIN_TIME_INTERVAL_MS = 3
 const RETRY_MS = 3000
 const SKIN_RETRY_MS = 15_000
 const MAP_FETCH_TIMEOUT_MS = 3000
+/** No images, so the partner page falls back to its own circles for every sprite. */
+const BUILT_IN_SKIN: OsuSkin = { id: 'built-in', ini: null, images: {} }
 
 type Events = {
   status(status: OsuStatus): void
@@ -23,9 +26,10 @@ type Json = Record<string, any>
 
 /** Follows osu! stable or lazer through tosu (or stable through gosumemory) so the partner can draw the map locally. */
 export class OsuWatcher {
-  status: OsuStatus = { source: null, client: null, state: null, mods: 0, offset: null }
+  status: OsuStatus = { source: null, client: 'stable', detected: null, state: null, mods: 0, offset: null }
   map: OsuMap | null = null
   skin: OsuSkin | null = null
+  private lazerFiles: string | null = null
   private skinId: string | null = null
   private skinLoading = false
   private skinRetryAt = 0
@@ -45,6 +49,29 @@ export class OsuWatcher {
     void this.loop()
   }
 
+  /**
+   * Lazer keeps skins inside its file store, which tosu can't serve, so lazer always sends the
+   * partner page's built-in look. Stable reloads the skin osu! is using.
+   */
+  setClient(client: GameClient) {
+    if (client === this.status.client && (client === 'stable' || this.skin === BUILT_IN_SKIN)) return
+    this.set({ client })
+    this.checksum = null
+    this.map = null
+    if (client === 'lazer') {
+      void lazerFilesDir().then((dir) => {
+        this.lazerFiles = dir
+      })
+      this.skinId = BUILT_IN_SKIN.id
+      this.skin = BUILT_IN_SKIN
+      this.events.skin(BUILT_IN_SKIN)
+    } else {
+      this.skinId = null
+      this.skin = null
+      this.skinRetryAt = 0
+    }
+  }
+
   stop() {
     this.stopped = true
     for (const ws of this.sockets) ws.terminate()
@@ -55,7 +82,7 @@ export class OsuWatcher {
       await this.followTosu()
       if (this.stopped) return
       if (this.status.source === null) await this.followGosumemory()
-      this.set({ source: null, client: null, state: null })
+      this.set({ source: null, detected: null, state: null })
       await new Promise((resolve) => setTimeout(resolve, RETRY_MS))
     }
   }
@@ -100,17 +127,25 @@ export class OsuWatcher {
         const state = data.state?.number ?? null
         const mods = state === PLAYING ? (data.play?.mods?.number ?? 0) : this.status.mods
         const offset = data.settings?.audio?.offset?.universal
-        const client = typeof data.client === 'string' && data.client.toLowerCase().includes('lazer') ? 'lazer' : 'stable'
-        this.set({ client, state, mods, offset: typeof offset === 'number' ? offset : null })
+        const detected = typeof data.client === 'string' && data.client.toLowerCase().includes('lazer') ? 'lazer' : 'stable'
+        this.set({ detected, state, mods, offset: typeof offset === 'number' ? offset : null })
         const songs = data.folders?.songs
+        // Lazer reports the .osu file relative to its hashed file store (e.g. "3\38\<sha256>"),
+        // with an empty songs folder, so it has to be joined to the store's location.
+        const lazer = this.status.client === 'lazer' || detected === 'lazer'
         void this.loadMap(data.beatmap?.checksum, [
+          ...(lazer
+            ? [joinIfStrings(this.lazerFiles, data.files?.beatmap), joinIfStrings(this.lazerFiles, data.directPath?.beatmapFile)]
+            : []),
           joinIfStrings(songs, data.folders?.beatmap, data.files?.beatmap),
           joinIfStrings(data.directPath?.beatmapFile),
           joinIfStrings(songs, data.directPath?.beatmapFile),
         ])
         if (!this.precise) this.time(data.beatmap?.time?.live)
-        const skinName = data.folders?.skin
-        void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current')
+        if (this.status.client === 'stable') {
+          const skinName = data.folders?.skin
+          void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current')
+        }
       },
     )
     for (const ws of this.sockets) if (ws.url.endsWith('/precise')) ws.terminate()
@@ -120,7 +155,7 @@ export class OsuWatcher {
   private async followGosumemory() {
     await this.stream(
       `ws://127.0.0.1:${this.port}/ws`,
-      () => this.set({ source: 'gosumemory', client: 'stable' }),
+      () => this.set({ source: 'gosumemory', detected: 'stable' }),
       (data) => {
         const menu = data.menu ?? {}
         const bm = menu.bm ?? {}
@@ -156,7 +191,7 @@ export class OsuWatcher {
     this.skinLoading = true
     try {
       const skin = await fetchSkin(this.port, id)
-      if (this.skinId !== id) return
+      if (this.skinId !== id || this.status.client !== 'stable') return
       this.skin = skin
       if (skin) {
         this.events.skin(skin)
@@ -222,6 +257,22 @@ export class OsuWatcher {
       return null
     }
   }
+}
+
+/**
+ * Lazer's data folder defaults to %APPDATA%\osu; moving it in lazer's settings writes the new
+ * location to storage.ini there as "FullPath = ...".
+ */
+async function lazerFilesDir() {
+  const base = process.env.APPDATA
+    ? path.join(process.env.APPDATA, 'osu')
+    : path.join(os.homedir(), '.local', 'share', 'osu')
+  try {
+    const ini = await readFile(path.join(base, 'storage.ini'), 'utf8')
+    const custom = /^\s*FullPath\s*=\s*(.+?)\s*$/m.exec(ini)?.[1]
+    if (custom && path.isAbsolute(custom)) return path.join(custom, 'files')
+  } catch {}
+  return path.join(base, 'files')
 }
 
 function joinIfStrings(...parts: unknown[]) {

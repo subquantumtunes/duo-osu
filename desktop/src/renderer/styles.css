@@ -353,6 +353,10 @@ select {
   cursor: pointer;
 }
 
+#client-hint[data-warn] {
+  color: #f5b14c;
+}
+
 .segmented {
   display: flex;
   padding: 3px;

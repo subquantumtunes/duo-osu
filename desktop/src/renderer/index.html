@@ -63,6 +63,15 @@
 
       <aside class="sidebar" aria-label="Setup">
         <section class="card">
+          <h2>osu! version</h2>
+          <div class="segmented" role="radiogroup" aria-label="osu! version">
+            <button type="button" role="radio" data-client="stable">Stable</button>
+            <button type="button" role="radio" data-client="lazer">Lazer</button>
+          </div>
+          <p id="client-hint" class="muted small" aria-live="polite"></p>
+        </section>
+
+        <section class="card">
           <h2><span class="step">1</span>Screen with osu!</h2>
           <div id="screens" class="screens" role="radiogroup" aria-label="Screen to share"></div>
           <button id="refresh-screens" type="button" class="link">Refresh screens</button>

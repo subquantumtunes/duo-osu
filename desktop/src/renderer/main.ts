@@ -1,16 +1,25 @@
 import { clockRate } from '@/lib/beatmap'
 import type { Role, TapSlot } from '@/lib/protocol'
 import { compensatingOffset, formatMs, videoInputLag } from '@/lib/timing'
-import type { InputStatus, OsuStatus, ScreenSource } from '../shared/api'
+import type { GameClient, InputStatus, OsuStatus, ScreenSource } from '../shared/api'
 import { keyLabel } from '../shared/keys'
 import { HostSession, type Quality } from './session'
 
 const OSU_PLAYING = 2
 const SETTINGS_KEY = 'osu-coop-host-settings'
 
-type Settings = { screenId: string | null; guestRole: Role; k1: string; k2: string } & Quality
+type Settings = { screenId: string | null; guestRole: Role; k1: string; k2: string; client: GameClient } & Quality
 
-const DEFAULTS: Settings = { screenId: null, guestRole: 'tap', k1: 'KeyZ', k2: 'KeyX', fps: 60, height: 720, codec: 'h264' }
+const DEFAULTS: Settings = {
+  screenId: null,
+  guestRole: 'tap',
+  k1: 'KeyZ',
+  k2: 'KeyX',
+  client: 'stable',
+  fps: 60,
+  height: 720,
+  codec: 'h264',
+}
 
 function loadSettings(): Settings {
   try {
@@ -29,7 +38,7 @@ const coop = window.coop
 
 let screens: ScreenSource[] = []
 let inputStatus: InputStatus = { native: false, reason: null }
-let osu: OsuStatus = { source: null, client: null, state: null, mods: 0, offset: null }
+let osu: OsuStatus = { source: null, client: settings.client, detected: null, state: null, mods: 0, offset: null }
 let keys = { k1: false, k2: false }
 let listening: TapSlot | null = null
 let playback = { playing: false, rate: 1 }
@@ -196,6 +205,17 @@ function render() {
   $('stat-delay').textContent = session.partner?.video != null ? `${session.partner.video} ms` : '-'
   $('stat-mode').textContent = session.partner ? (session.partner.mode === 'playfield' ? 'Local map' : 'Stream') : '-'
 
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-client]')) {
+    button.setAttribute('aria-checked', String(button.dataset.client === settings.client))
+  }
+  const mismatch = osu.detected !== null && osu.detected !== settings.client
+  $('client-hint').textContent = mismatch
+    ? `tosu says osu! ${osu.detected} is running. Switch to ${osu.detected === 'lazer' ? 'Lazer' : 'Stable'} so your partner gets the map.`
+    : settings.client === 'lazer'
+      ? 'Your partner sees the co-op site’s own circles. Lazer skins can’t be read from outside the game.'
+      : 'Your partner sees the circles from the skin you have selected in osu!.'
+  $('client-hint').toggleAttribute('data-warn', mismatch)
+
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-role]')) {
     button.setAttribute('aria-checked', String(button.dataset.role === settings.guestRole))
   }
@@ -264,6 +284,15 @@ function wireControls() {
     setTimeout(() => (button.textContent = 'Copy code'), 1500)
   })
 
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-client]')) {
+    button.addEventListener('click', () => {
+      settings.client = button.dataset.client === 'lazer' ? 'lazer' : 'stable'
+      saveSettings()
+      coop.setClient(settings.client)
+      render()
+    })
+  }
+
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-role]')) {
     button.addEventListener('click', () => {
       settings.guestRole = button.dataset.role === 'aim' ? 'aim' : 'tap'
@@ -321,6 +350,7 @@ async function init() {
   coop.onTime((ms) => session.publishClock(ms, playback.rate, playback.playing))
   coop.onMap((map) => session.publishMap(map.checksum, map.text))
   coop.onSkin((skin) => session.publishSkin(skin))
+  coop.setClient(settings.client)
 
   const [status, snapshot] = await Promise.all([coop.inputStatus(), coop.osuSnapshot()])
   inputStatus = status

@@ -15,6 +15,7 @@ const api: CoopApi = {
   inputStatus: () => ipcRenderer.invoke(IPC.inputStatus),
   osuSnapshot: () => ipcRenderer.invoke(IPC.osuSnapshot),
   setBindings: (k1, k2) => ipcRenderer.invoke(IPC.setBindings, k1, k2),
+  setClient: (client) => ipcRenderer.send(IPC.setClient, client),
   aim: (x, y) => ipcRenderer.send(IPC.aim, x, y),
   key: (slot, down) => ipcRenderer.send(IPC.key, slot, down),
   release: () => ipcRenderer.send(IPC.release),

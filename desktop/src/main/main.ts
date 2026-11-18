@@ -114,6 +114,11 @@ function registerIpc() {
     return injector.setBindings(k1, k2)
   })
 
+  ipcMain.on(IPC.setClient, (event, client: unknown) => {
+    if (!fromHostWindow(event) || (client !== 'stable' && client !== 'lazer')) return
+    watcher.setClient(client)
+  })
+
   ipcMain.on(IPC.aim, (event, x: unknown, y: unknown) => {
     if (!fromHostWindow(event) || typeof x !== 'number' || typeof y !== 'number') return
     if (!Number.isFinite(x) || !Number.isFinite(y)) return
