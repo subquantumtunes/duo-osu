@@ -18,6 +18,7 @@ import {
 } from '@/lib/protocol'
 import { ICE_SERVERS } from '@/lib/browser'
 import { type Beatmap, parseBeatmap } from '@/lib/beatmap'
+import { type Skin, closeSkin, loadSkin } from '@/lib/skin'
 import { SyncClock } from '@/lib/sync-clock'
 import { type PartnerMode, SOURCE_LAG_MS } from '@/lib/timing'
 
@@ -86,6 +87,9 @@ export function useGuestSession(code: string) {
   const [sync, setSync] = useState<{ live: boolean; mods: number } | null>(null)
   const [map, setMap] = useState<Beatmap | null>(null)
   const [mapLoading, setMapLoading] = useState(false)
+  const [skin, setSkin] = useState<Skin | null>(null)
+  const skinChunksRef = useRef<{ id: string; parts: string[]; got: number } | null>(null)
+  const skinLoadRef = useRef(0)
   const [videoLatency, setVideoLatency] = useState<number | null>(null)
   const [videoIssue, setVideoIssue] = useState<VideoIssue | null>('connecting')
   const videoIssueRef = useRef<VideoIssue | null>('connecting')
@@ -144,6 +148,27 @@ export function useGuestSession(code: string) {
     chunksRef.current = null
     setMap(parseBeatmap(pending.parts.join(''), pending.id))
     setMapLoading(false)
+  }
+
+  const receiveSkinChunk = (msg: Extract<HostMessage, { t: 'skin' }>) => {
+    let pending = skinChunksRef.current
+    if (!pending || pending.id !== msg.id || msg.i === 0) {
+      pending = { id: msg.id, parts: new Array(msg.n).fill(''), got: 0 }
+      skinChunksRef.current = pending
+    }
+    if (msg.i < 0 || msg.i >= pending.parts.length) return
+    pending.parts[msg.i] = msg.d
+    pending.got++
+    if (pending.got < pending.parts.length) return
+    skinChunksRef.current = null
+    const load = ++skinLoadRef.current
+    void loadSkin(pending.parts.join('')).then((next) => {
+      if (load !== skinLoadRef.current) return closeSkin(next)
+      setSkin((prev) => {
+        closeSkin(prev)
+        return next
+      })
+    })
   }
 
   const leave = useCallback(() => {
@@ -215,6 +240,8 @@ export function useGuestSession(code: string) {
           setSync({ live: msg.live, mods: msg.mods })
         } else if (msg.t === 'map') {
           receiveMapChunk(msg)
+        } else if (msg.t === 'skin') {
+          receiveSkinChunk(msg)
         } else if (msg.t === 'full') {
           setError('This room already has a partner.')
           setStatus('error')
@@ -358,6 +385,7 @@ export function useGuestSession(code: string) {
     sync,
     map,
     mapLoading,
+    skin,
     videoLatency,
     videoIssue,
     retryVideo,

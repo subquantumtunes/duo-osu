@@ -2,6 +2,7 @@
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
 import type { Beatmap } from '@/lib/beatmap'
+import type { Skin } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 import { Playfield } from './playfield'
 import { Maximize, Volume2 } from 'lucide-react'
@@ -35,6 +36,7 @@ export type PlayfieldProps = {
   mods: number
   clockRef: RefObject<SyncClock>
   leadMsRef: RefObject<number>
+  skin: Skin | null
 }
 
 export function GuestStage({

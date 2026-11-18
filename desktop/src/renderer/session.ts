@@ -130,6 +130,7 @@ export class HostSession {
 
   private sync = { live: false, mods: 0 }
   private map: { checksum: string; text: string } | null = null
+  private skin: { id: string; text: string } | null = null
   private clockSeq = 0
   private peer: Peer | null = null
   private audioCalls: MediaConnection[] = []
@@ -245,6 +246,11 @@ export class HostSession {
     if (this.ctrl?.open) this.sendMap(this.ctrl)
   }
 
+  publishSkin(skin: { id: string; ini: string | null; images: Record<string, { hd: boolean; data: string }> }) {
+    this.skin = { id: skin.id, text: JSON.stringify({ ini: skin.ini, images: skin.images }) }
+    if (this.ctrl?.open) this.sendSkin(this.ctrl)
+  }
+
   publishClock(time: number, rate: number, playing: boolean) {
     const input = this.input
     if (input?.readyState !== 'open' || input.bufferedAmount > 1024) return
@@ -286,6 +292,7 @@ export class HostSession {
       conn.send({ t: 'welcome', guestRole: this.guestRole } satisfies HostMessage)
       conn.send({ t: 'sync', ...this.sync } satisfies HostMessage)
       this.sendMap(conn)
+      this.sendSkin(conn)
       this.startStats()
       if (!this.stream) {
         this.videoNote = 'no screen capture'
@@ -522,6 +529,16 @@ export class HostSession {
     for (let i = 0; i < n; i++) {
       const d = map.text.slice(i * MAP_CHUNK_CHARS, (i + 1) * MAP_CHUNK_CHARS)
       conn.send({ t: 'map', id: map.checksum, i, n, d } satisfies HostMessage)
+    }
+  }
+
+  private sendSkin(conn: DataConnection) {
+    const skin = this.skin
+    if (!skin) return
+    const n = Math.max(1, Math.ceil(skin.text.length / MAP_CHUNK_CHARS))
+    for (let i = 0; i < n; i++) {
+      const d = skin.text.slice(i * MAP_CHUNK_CHARS, (i + 1) * MAP_CHUNK_CHARS)
+      conn.send({ t: 'skin', id: skin.id, i, n, d } satisfies HostMessage)
     }
   }
 

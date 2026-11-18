@@ -26,6 +26,7 @@ export type HostMessage =
   | { t: 'input-ok' }
   | { t: 'sync'; live: boolean; mods: number }
   | { t: 'map'; id: string; i: number; n: number; d: string }
+  | { t: 'skin'; id: string; i: number; n: number; d: string }
 
 export const MAP_CHUNK_CHARS = 16_000
 

@@ -40,6 +40,7 @@ const watcher = new OsuWatcher(TOSU_PORT, {
   status: (status) => win?.webContents.send(IPC.osu, status),
   time: (ms) => win?.webContents.send(IPC.time, ms),
   map: (map) => win?.webContents.send(IPC.map, map),
+  skin: (skin) => win?.webContents.send(IPC.skin, skin),
 })
 
 function fromHostWindow(event: IpcMainEvent | IpcMainInvokeEvent) {
@@ -99,7 +100,7 @@ function registerIpc() {
   )
 
   ipcMain.handle(IPC.osuSnapshot, (event) =>
-    fromHostWindow(event) ? { status: watcher.status, map: watcher.map } : null,
+    fromHostWindow(event) ? { status: watcher.status, map: watcher.map, skin: watcher.skin } : null,
   )
 
   ipcMain.handle(IPC.setBindings, (event, k1: unknown, k2: unknown) => {

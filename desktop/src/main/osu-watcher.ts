@@ -2,17 +2,20 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import WebSocket from 'ws'
-import type { OsuMap, OsuStatus } from '../shared/api'
+import type { OsuMap, OsuSkin, OsuStatus } from '../shared/api'
+import { fetchSkin } from './skin-loader'
 
 const PLAYING = 2
 const MAX_MAP_BYTES = 4_000_000
 const MIN_TIME_INTERVAL_MS = 3
 const RETRY_MS = 3000
+const SKIN_RETRY_MS = 15_000
 
 type Events = {
   status(status: OsuStatus): void
   time(ms: number): void
   map(map: OsuMap): void
+  skin(skin: OsuSkin): void
 }
 
 type Json = Record<string, any>
@@ -21,6 +24,10 @@ type Json = Record<string, any>
 export class OsuWatcher {
   status: OsuStatus = { source: null, state: null, mods: 0, offset: null }
   map: OsuMap | null = null
+  skin: OsuSkin | null = null
+  private skinId: string | null = null
+  private skinLoading = false
+  private skinRetryAt = 0
   private checksum: string | null = null
   private mapRetryAt = 0
   private precise = false
@@ -100,6 +107,8 @@ export class OsuWatcher {
           joinIfStrings(songs, data.directPath?.beatmapFile),
         ])
         if (!this.precise) this.time(data.beatmap?.time?.live)
+        const skinName = data.folders?.skin
+        void this.loadSkin(typeof skinName === 'string' && skinName ? skinName : 'current')
       },
     )
     for (const ws of this.sockets) if (ws.url.endsWith('/precise')) ws.terminate()
@@ -135,6 +144,27 @@ export class OsuWatcher {
     if (now - this.lastTimeSent < MIN_TIME_INTERVAL_MS) return
     this.lastTimeSent = now
     this.events.time(value)
+  }
+
+  /** Refetches only when the skin folder changes, or after a failed attempt has cooled down. */
+  private async loadSkin(id: string) {
+    if (this.skinLoading) return
+    if (id === this.skinId && (this.skin || performance.now() < this.skinRetryAt)) return
+    this.skinId = id
+    this.skinLoading = true
+    try {
+      const skin = await fetchSkin(this.port, id)
+      if (this.skinId !== id) return
+      this.skin = skin
+      if (skin) {
+        this.events.skin(skin)
+      } else {
+        this.skinRetryAt = performance.now() + SKIN_RETRY_MS
+        console.warn(`[osu-coop] Couldn't load the skin "${id}" from tosu; the partner sees the built-in circles.`)
+      }
+    } finally {
+      this.skinLoading = false
+    }
   }
 
   /** Tries each candidate path in order; tosu versions disagree on which fields hold the folder. */

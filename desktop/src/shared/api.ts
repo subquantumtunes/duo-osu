@@ -18,13 +18,16 @@ export type OsuStatus = {
 
 export type OsuMap = { checksum: string; text: string }
 
+export type SkinImage = { hd: boolean; data: string }
+export type OsuSkin = { id: string; ini: string | null; images: Record<string, SkinImage> }
+
 export type InputStatus = { native: boolean; reason: string | null }
 
 export type CoopApi = {
   listScreens(): Promise<ScreenSource[]>
   selectScreen(id: string): Promise<{ width: number; height: number } | null>
   inputStatus(): Promise<InputStatus>
-  osuSnapshot(): Promise<{ status: OsuStatus; map: OsuMap | null }>
+  osuSnapshot(): Promise<{ status: OsuStatus; map: OsuMap | null; skin: OsuSkin | null }>
   setBindings(k1: string, k2: string): Promise<boolean>
   aim(x: number, y: number): void
   key(slot: TapSlot, down: boolean): void
@@ -32,6 +35,7 @@ export type CoopApi = {
   onOsu(cb: (status: OsuStatus) => void): () => void
   onTime(cb: (ms: number) => void): () => void
   onMap(cb: (map: OsuMap) => void): () => void
+  onSkin(cb: (skin: OsuSkin) => void): () => void
 }
 
 export const IPC = {
@@ -46,4 +50,5 @@ export const IPC = {
   osu: 'coop:osu',
   time: 'coop:time',
   map: 'coop:map',
+  skin: 'coop:skin',
 } as const

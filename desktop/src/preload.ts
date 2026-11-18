@@ -21,6 +21,7 @@ const api: CoopApi = {
   onOsu: (cb) => subscribe(IPC.osu, cb),
   onTime: (cb) => subscribe(IPC.time, cb),
   onMap: (cb) => subscribe(IPC.map, cb),
+  onSkin: (cb) => subscribe(IPC.skin, cb),
 }
 
 contextBridge.exposeInMainWorld('coop', api)

@@ -315,11 +315,13 @@ async function init() {
   coop.onOsu(applyOsu)
   coop.onTime((ms) => session.publishClock(ms, playback.rate, playback.playing))
   coop.onMap((map) => session.publishMap(map.checksum, map.text))
+  coop.onSkin((skin) => session.publishSkin(skin))
 
   const [status, snapshot] = await Promise.all([coop.inputStatus(), coop.osuSnapshot()])
   inputStatus = status
   if (!status.native && status.reason) session.error = status.reason
   if (snapshot.map) session.publishMap(snapshot.map.checksum, snapshot.map.text)
+  if (snapshot.skin) session.publishSkin(snapshot.skin)
   applyOsu(snapshot.status)
 
   await applyBindings()

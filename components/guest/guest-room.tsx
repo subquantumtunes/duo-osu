@@ -89,7 +89,13 @@ export function GuestRoom({ code }: { code: string }) {
               onRetryVideo={session.retryVideo}
               playfield={
                 usePlayfield && session.map
-                  ? { map: session.map, mods: session.sync?.mods ?? 0, clockRef: session.clockRef, leadMsRef }
+                  ? {
+                      map: session.map,
+                      mods: session.sync?.mods ?? 0,
+                      clockRef: session.clockRef,
+                      leadMsRef,
+                      skin: session.skin,
+                    }
                   : null
               }
             />
