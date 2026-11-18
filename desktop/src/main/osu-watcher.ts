@@ -10,6 +10,7 @@ const MAX_MAP_BYTES = 4_000_000
 const MIN_TIME_INTERVAL_MS = 3
 const RETRY_MS = 3000
 const SKIN_RETRY_MS = 15_000
+const MAP_FETCH_TIMEOUT_MS = 3000
 
 type Events = {
   status(status: OsuStatus): void
@@ -20,9 +21,9 @@ type Events = {
 
 type Json = Record<string, any>
 
-/** Follows osu! stable through tosu (or gosumemory) so the partner can draw the map locally. */
+/** Follows osu! stable or lazer through tosu (or stable through gosumemory) so the partner can draw the map locally. */
 export class OsuWatcher {
-  status: OsuStatus = { source: null, state: null, mods: 0, offset: null }
+  status: OsuStatus = { source: null, client: null, state: null, mods: 0, offset: null }
   map: OsuMap | null = null
   skin: OsuSkin | null = null
   private skinId: string | null = null
@@ -54,7 +55,7 @@ export class OsuWatcher {
       await this.followTosu()
       if (this.stopped) return
       if (this.status.source === null) await this.followGosumemory()
-      this.set({ source: null, state: null })
+      this.set({ source: null, client: null, state: null })
       await new Promise((resolve) => setTimeout(resolve, RETRY_MS))
     }
   }
@@ -99,7 +100,8 @@ export class OsuWatcher {
         const state = data.state?.number ?? null
         const mods = state === PLAYING ? (data.play?.mods?.number ?? 0) : this.status.mods
         const offset = data.settings?.audio?.offset?.universal
-        this.set({ state, mods, offset: typeof offset === 'number' ? offset : null })
+        const client = typeof data.client === 'string' && data.client.toLowerCase().includes('lazer') ? 'lazer' : 'stable'
+        this.set({ client, state, mods, offset: typeof offset === 'number' ? offset : null })
         const songs = data.folders?.songs
         void this.loadMap(data.beatmap?.checksum, [
           joinIfStrings(songs, data.folders?.beatmap, data.files?.beatmap),
@@ -118,7 +120,7 @@ export class OsuWatcher {
   private async followGosumemory() {
     await this.stream(
       `ws://127.0.0.1:${this.port}/ws`,
-      () => this.set({ source: 'gosumemory' }),
+      () => this.set({ source: 'gosumemory', client: 'stable' }),
       (data) => {
         const menu = data.menu ?? {}
         const bm = menu.bm ?? {}
@@ -167,10 +169,14 @@ export class OsuWatcher {
     }
   }
 
-  /** Tries each candidate path in order; tosu versions disagree on which fields hold the folder. */
+  /**
+   * Tries each candidate path in order; tosu versions disagree on which fields hold the folder.
+   * Lazer keeps maps in a hashed file store with no Songs folder, so after the local paths fail
+   * this asks tosu for the current .osu file over HTTP.
+   */
   private async loadMap(checksum: unknown, candidates: (string | null)[]) {
     const files = [...new Set(candidates.filter((file): file is string => !!file && path.isAbsolute(file)))]
-    if (typeof checksum !== 'string' || !checksum || files.length === 0) return
+    if (typeof checksum !== 'string' || !checksum) return
     if (checksum === this.checksum && (this.map || performance.now() < this.mapRetryAt)) return
     this.checksum = checksum
     this.mapRetryAt = performance.now() + RETRY_MS
@@ -189,10 +195,32 @@ export class OsuWatcher {
         lastError = err
       }
     }
+    if (this.status.source === 'tosu') {
+      const text = await this.fetchMapFromTosu()
+      if (this.checksum !== checksum) return
+      if (text) {
+        this.map = { checksum, text }
+        this.events.map(this.map)
+        return
+      }
+    }
     console.warn(
       `[osu-coop] Couldn't read the beatmap file (tried ${files.join(', ')}): ${lastError instanceof Error ? lastError.message : (lastError ?? 'not found')}`,
     )
     this.map = null
+  }
+
+  private async fetchMapFromTosu() {
+    try {
+      const res = await fetch(`http://127.0.0.1:${this.port}/files/beatmap/file`, {
+        signal: AbortSignal.timeout(MAP_FETCH_TIMEOUT_MS),
+      })
+      if (!res.ok) return null
+      const text = await res.text()
+      return text.length > 0 && text.length <= MAX_MAP_BYTES && text.includes('[HitObjects]') ? text : null
+    } catch {
+      return null
+    }
   }
 }
 

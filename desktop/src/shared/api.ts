@@ -11,6 +11,7 @@ export type ScreenSource = {
 
 export type OsuStatus = {
   source: 'tosu' | 'gosumemory' | null
+  client: 'stable' | 'lazer' | null
   state: number | null
   mods: number
   offset: number | null
