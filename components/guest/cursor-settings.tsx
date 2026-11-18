@@ -6,6 +6,9 @@ import { type CursorSettings, cursorColor } from '@/lib/cursor-settings'
 const HUE_TRACK =
   'linear-gradient(to right, hsl(0 100% 60%), hsl(60 100% 60%), hsl(120 100% 60%), hsl(180 100% 60%), hsl(240 100% 60%), hsl(300 100% 60%), hsl(360 100% 60%))'
 
+const THUMB =
+  '[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-background [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-background [&::-webkit-slider-thumb]:shadow'
+
 export function CursorSettingsPanel({
   settings,
   onChange,
@@ -18,6 +21,7 @@ export function CursorSettingsPanel({
   const id = useId()
   const color = cursorColor(settings.hue)
   const coloured = !(settings.useSkin && skinHasCursor)
+  const sizePercent = ((settings.size - 0.5) / 1.5) * 100
 
   return (
     <section
@@ -51,7 +55,7 @@ export function CursorSettingsPanel({
             step={1}
             value={settings.hue}
             onChange={(e) => onChange({ hue: Number(e.target.value) })}
-            className="h-2 w-full cursor-pointer appearance-none rounded-full [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-transparent [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow"
+            className={`h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`}
             style={{ background: HUE_TRACK }}
           />
         </div>
@@ -71,7 +75,10 @@ export function CursorSettingsPanel({
             step={0.05}
             value={settings.size}
             onChange={(e) => onChange({ size: Number(e.target.value) })}
-            className="w-full cursor-pointer accent-primary"
+            className={`h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`}
+            style={{
+              background: `linear-gradient(to right, ${color} ${sizePercent}%, var(--muted) ${sizePercent}%)`,
+            }}
           />
         </div>
       </div>
