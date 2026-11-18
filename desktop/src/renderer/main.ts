@@ -29,7 +29,7 @@ const coop = window.coop
 
 let screens: ScreenSource[] = []
 let inputStatus: InputStatus = { native: false, reason: null }
-let osu: OsuStatus = { source: null, state: null, mods: 0, offset: null }
+let osu: OsuStatus = { source: null, client: null, state: null, mods: 0, offset: null }
 let keys = { k1: false, k2: false }
 let listening: TapSlot | null = null
 let playback = { playing: false, rate: 1 }
@@ -107,13 +107,18 @@ function renderTiming() {
   const box = $('timing')
   const parts: string[] = []
   const source = osu.source
+  const lazer = osu.client === 'lazer'
+  const offsetLabel = lazer ? 'Audio offset' : 'Universal Offset'
+  const offsetWhere = lazer
+    ? 'Settings → Audio → Offset Adjustment → Audio offset.'
+    : 'Options → Gameplay → Universal Offset, or Alt + Plus/Minus in game.'
   if (!source) {
     parts.push(
-      '<p class="muted">Run tosu next to osu! stable. Your partner then gets the map drawn on their own screen, timed to your game, instead of reacting to the stream.</p>',
+      '<p class="muted">Run tosu next to osu! (stable or lazer). Your partner then gets the map drawn on their own screen, timed to your game, instead of reacting to the stream.</p>',
     )
   } else {
-    const offset = osu.offset !== null ? `. Current Universal Offset: <strong>${formatMs(osu.offset)}</strong>` : ''
-    parts.push(`<p class="muted">Reading osu! through ${source}${offset}</p>`)
+    const offset = osu.offset !== null ? `. Current ${offsetLabel}: <strong>${formatMs(osu.offset)}</strong>` : ''
+    parts.push(`<p class="muted">Reading osu!${lazer ? ' lazer' : ''} through ${source}${offset}</p>`)
   }
 
   const partner = session.partner
@@ -131,7 +136,7 @@ function renderTiming() {
       ? 'Your partner’s screen already plays ahead by the ping, so no extra offset is needed.'
       : `Their taps arrive about ${Math.round(lag)} ms late.`
     parts.push(
-      `<div class="offset"><span class="muted small">Set Universal Offset in osu! to</span><strong>${formatMs(target)}</strong><span class="muted small">${note} Options → Gameplay → Universal Offset, or Alt + Plus/Minus in game.</span></div>`,
+      `<div class="offset"><span class="muted small">Set ${offsetLabel} in osu! to</span><strong>${formatMs(target)}</strong><span class="muted small">${note} ${offsetWhere}</span></div>`,
     )
   }
   box.innerHTML = parts.join('')
