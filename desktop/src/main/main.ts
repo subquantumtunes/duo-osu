@@ -203,8 +203,11 @@ app.whenReady().then(() => {
   createWindow()
   watcher.start()
 
-  tosu = new TosuManager(TOSU_PORT, path.join(app.getPath('userData'), 'tosu'), (message) =>
-    win?.setTitle(`osu! co-op host — ${message}`),
+  tosu = new TosuManager(
+    TOSU_PORT,
+    path.join(app.getPath('userData'), 'tosu'),
+    app.isPackaged ? path.join(process.resourcesPath, 'tosu') : null,
+    (message) => win?.setTitle(`osu! co-op host — ${message}`),
   )
   tosu
     .ensure()

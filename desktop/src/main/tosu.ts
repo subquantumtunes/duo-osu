@@ -65,9 +65,17 @@ async function download(dir: string, onStatus: (message: string) => void) {
   await fs.rm(zip, { force: true })
 }
 
+async function copyBundled(from: string, to: string) {
+  if (!(await findExe(from))) return false
+  await fs.rm(to, { recursive: true, force: true })
+  await fs.cp(from, to, { recursive: true })
+  return true
+}
+
 /**
  * Makes sure tosu is running for the session: reuses one the user already started, otherwise
- * downloads it once into the app's data folder and runs it hidden until dosu quits.
+ * runs the copy shipped with the installer (copied into the app's data folder so tosu can write
+ * its config there and it survives app updates), and only downloads it if neither exists.
  */
 export class TosuManager {
   private child: ChildProcess | null = null
@@ -75,6 +83,7 @@ export class TosuManager {
   constructor(
     private readonly port: number,
     private readonly dir: string,
+    private readonly bundledDir: string | null,
     private readonly onStatus: (message: string) => void,
   ) {}
 
@@ -83,6 +92,9 @@ export class TosuManager {
     if (await portOpen(this.port)) return
 
     let exe = await findExe(this.dir)
+    if (!exe && this.bundledDir && (await copyBundled(this.bundledDir, this.dir))) {
+      exe = await findExe(this.dir)
+    }
     if (!exe) {
       await download(this.dir, this.onStatus)
       exe = await findExe(this.dir)

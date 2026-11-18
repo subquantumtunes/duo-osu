@@ -32,6 +32,16 @@ jobs:
 
       - run: npm ci
 
+      - name: Bundle tosu
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo tosuapp/tosu --pattern 'tosu-windows-*.zip' --output tosu.zip
+          Expand-Archive -LiteralPath tosu.zip -DestinationPath vendor/tosu -Force
+          gh api repos/tosuapp/tosu/license -H 'Accept: application/vnd.github.raw' > vendor/tosu/LICENSE-tosu.txt
+          Remove-Item tosu.zip
+          if (-not (Get-ChildItem vendor/tosu -Recurse -Filter 'tosu*.exe')) { throw 'tosu.exe missing from the tosu download' }
+
       - run: npm run dist
 
       - uses: softprops/action-gh-release@v2

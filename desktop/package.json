@@ -29,6 +29,7 @@
     "productName": "dosu",
     "files": ["dist/**/*", "package.json"],
     "asarUnpack": ["node_modules/koffi/**", "node_modules/loopback-capture/**"],
+    "extraResources": [{ "from": "vendor/tosu", "to": "tosu" }],
     "directories": { "output": "release" },
     "win": {
       "target": ["nsis"],

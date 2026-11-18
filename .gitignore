@@ -7,6 +7,7 @@
 /desktop/node_modules
 /desktop/dist
 /desktop/release
+/desktop/vendor
 
 # next.js
 /.next/
