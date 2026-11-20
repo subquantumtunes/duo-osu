@@ -15,6 +15,8 @@ import { RULESET_MANIA, RULESET_TAIKO, isLaneRuleset, laneName } from '@/lib/lan
 import { CursorSettingsPanel } from './cursor-settings'
 import { LaneSettingsPanel } from './lane-settings'
 import { useLaneSettings } from '@/lib/lane-settings'
+import { useStandardSettings } from '@/lib/standard-settings'
+import { StandardSettingsPanel } from './standard-settings'
 
 export function GuestRoom({ code }: { code: string }) {
   const session = useGuestSession(code)
@@ -25,6 +27,7 @@ export function GuestRoom({ code }: { code: string }) {
   const leadMsRef = useRef(0)
   const [cursorStyle, updateCursorStyle] = useCursorSettings()
   const [laneSettings, updateLaneSettings] = useLaneSettings()
+  const [standardSettings, updateStandardSettings] = useStandardSettings()
   // Older hosts don't say which map is live, so only check it when they do.
   const mapIsCurrent = session.sync?.map === undefined || session.sync.map === session.map?.checksum
   const ruleset = session.sync?.ruleset ?? null
@@ -129,6 +132,7 @@ export function GuestRoom({ code }: { code: string }) {
               inputLive={Boolean(session.sync?.live)}
               laneControls={session.role === 'tap' ? laneControls : null}
               laneSettings={laneSettings}
+              standardSettings={standardSettings}
               playfield={
                 usePlayfield && session.map
                   ? {
@@ -154,7 +158,14 @@ export function GuestRoom({ code }: { code: string }) {
             {session.role === 'tap' && laneMode !== null && (
               <LaneSettingsPanel ruleset={laneMode} settings={laneSettings} onChange={updateLaneSettings} />
             )}
-            {session.role === 'aim' && (
+            {laneMode === null && (
+              <StandardSettingsPanel
+                settings={standardSettings}
+                onChange={updateStandardSettings}
+                showAutopilot={session.role === 'tap'}
+              />
+            )}
+            {(session.role === 'aim' || (laneMode === null && standardSettings.autopilot)) && (
               <CursorSettingsPanel
                 settings={cursorStyle}
                 onChange={updateCursorStyle}
