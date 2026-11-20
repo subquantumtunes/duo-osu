@@ -7,6 +7,8 @@ export function isTapSlot(value: unknown): value is TapSlot {
 
 export type ScreenSource = {
   id: string
+  /** `window` is the osu! game window itself; `screen` is a whole monitor. */
+  kind: 'window' | 'screen'
   name: string
   width: number
   height: number
@@ -55,6 +57,8 @@ export type CoopApi = {
   aim(x: number, y: number): void
   key(slot: TapSlot, down: boolean): void
   release(): void
+  /** The captured osu! window closed (for example osu! restarted). */
+  onCaptureLost(cb: () => void): () => void
   onOsu(cb: (status: OsuStatus) => void): () => void
   onTime(cb: (ms: number) => void): () => void
   onMap(cb: (map: OsuMap) => void): () => void
@@ -69,6 +73,7 @@ export type CoopApi = {
 export const IPC = {
   listScreens: 'coop:list-screens',
   selectScreen: 'coop:select-screen',
+  captureLost: 'coop:capture-lost',
   inputStatus: 'coop:input-status',
   osuSnapshot: 'coop:osu-snapshot',
   setBindings: 'coop:set-bindings',

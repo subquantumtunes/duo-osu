@@ -20,6 +20,7 @@ const api: CoopApi = {
   aim: (x, y) => ipcRenderer.send(IPC.aim, x, y),
   key: (slot, down) => ipcRenderer.send(IPC.key, slot, down),
   release: () => ipcRenderer.send(IPC.release),
+  onCaptureLost: (cb) => subscribe(IPC.captureLost, cb),
   onOsu: (cb) => subscribe(IPC.osu, cb),
   onTime: (cb) => subscribe(IPC.time, cb),
   onMap: (cb) => subscribe(IPC.map, cb),

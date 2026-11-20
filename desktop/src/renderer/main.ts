@@ -23,6 +23,8 @@ const SETTINGS_KEY = 'osu-coop-host-settings'
 
 type Settings = {
   screenId: string | null
+  /** Share the osu! window whenever it's open; off once the host picks a whole screen. */
+  preferWindow: boolean
   guestRole: Role
   k1: string
   k2: string
@@ -36,6 +38,7 @@ type Settings = {
 
 const DEFAULTS: Settings = {
   screenId: null,
+  preferWindow: true,
   guestRole: 'tap',
   k1: 'KeyZ',
   k2: 'KeyX',
@@ -151,7 +154,9 @@ async function applyLaneBindings() {
 
 function applyOsu(next: OsuStatus) {
   const modeChanged = next.ruleset !== osu.ruleset || next.keys !== osu.keys
+  const osuAppeared = osu.source === null && next.source !== null
   osu = next
+  if (osuAppeared) maybeRefreshForWindow()
   if (modeChanged && next.ruleset === RULESET_MANIA && next.keys) maniaCount = next.keys
   if (modeChanged) void applyLaneBindings()
   if (next.detected && next.detected !== settings.client) {
@@ -266,19 +271,30 @@ function renderScreens() {
       name.textContent = screen.name + (screen.primary ? ' (main)' : '')
       const size = document.createElement('span')
       size.className = 'muted'
-      size.textContent = `${screen.width} × ${screen.height}`
+      size.textContent =
+        screen.kind === 'window'
+          ? `${screen.width} × ${screen.height} · recommended`
+          : `${screen.width} × ${screen.height}`
       text.append(name, size)
       button.append(img, text)
-      button.addEventListener('click', () => void selectScreen(screen.id))
+      button.addEventListener('click', () => void selectScreen(screen.id, true))
       return button
     }),
   )
   if (screens.length === 0) {
     const empty = document.createElement('p')
     empty.className = 'muted small'
-    empty.textContent = 'No screens found. Click Refresh screens.'
+    empty.textContent = 'Nothing to share found. Click Refresh.'
     list.append(empty)
   }
+  const current = screens.find((s) => s.id === settings.screenId)
+  const hasWindow = screens.some((s) => s.kind === 'window')
+  $('capture-hint').textContent =
+    current?.kind === 'window'
+      ? 'Only the osu! window is streamed. Use borderless or windowed in osu!; exclusive fullscreen can stream a black picture.'
+      : hasWindow
+        ? 'Sharing a whole screen. Pick the osu! window for a sharper picture that keeps other windows private.'
+        : 'Open osu! and click Refresh to share just its window.'
 }
 
 function renderTiming() {
@@ -434,24 +450,49 @@ function render() {
   start.disabled = session.status === 'starting' || (!active && !settings.screenId)
 
   $('error').textContent =
-    session.error ?? (!active && !settings.screenId ? 'Pick the screen osu! runs on first.' : '')
+    session.error ?? (!active && !settings.screenId ? 'Pick the osu! window or a screen to share first.' : '')
 
   renderScreens()
   renderTiming()
 }
 
-async function selectScreen(id: string) {
+async function selectScreen(id: string, fromUser = false) {
   const ok = await coop.selectScreen(id)
   settings.screenId = ok ? id : null
+  if (ok && fromUser) settings.preferWindow = screens.find((s) => s.id === id)?.kind === 'window'
   saveSettings()
   render()
 }
 
+let refreshing = false
+
 async function refreshScreens() {
-  screens = await coop.listScreens()
-  const keep = screens.find((s) => s.id === settings.screenId) ?? screens.find((s) => s.primary) ?? screens[0]
-  if (keep) await selectScreen(keep.id)
-  else render()
+  if (refreshing) return
+  refreshing = true
+  try {
+    screens = await coop.listScreens()
+    const osuWindow = screens.find((s) => s.kind === 'window')
+    const saved = screens.find((s) => s.id === settings.screenId)
+    const keep =
+      (settings.preferWindow ? osuWindow : undefined) ??
+      saved ??
+      screens.find((s) => s.primary) ??
+      screens.find((s) => s.kind === 'screen') ??
+      screens[0]
+    if (keep) await selectScreen(keep.id)
+    else render()
+  } finally {
+    refreshing = false
+  }
+}
+
+const sharingIdle = () => session.status === 'idle' || session.status === 'error'
+
+/** When osu! starts or restarts while not sharing, pick up its new window. */
+function maybeRefreshForWindow() {
+  if (!settings.preferWindow || !sharingIdle()) return
+  if (screens.find((s) => s.id === settings.screenId)?.kind === 'window') return
+  void refreshScreens()
 }
 
 async function applyBindings() {
@@ -605,6 +646,14 @@ async function init() {
   render()
 
   coop.onOsu(applyOsu)
+  coop.onCaptureLost(() => {
+    if (sharingIdle()) {
+      void refreshScreens()
+      return
+    }
+    session.error = 'The osu! window closed. Stop sharing, then start again to pick up the new window.'
+    render()
+  })
   coop.onTime((ms) => session.publishClock(ms, playback.rate, playback.playing))
   coop.onMap((map) => session.publishMap(map.checksum, map.text))
   coop.onSkin((skin) => session.publishSkin(skin))
