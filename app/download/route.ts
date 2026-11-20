@@ -2,14 +2,17 @@ export const dynamic = 'force-dynamic'
 
 const REPO = 'subquantumtunes/duo-osu'
 const ASSET_NAME = 'duosu-Setup.exe'
+const VERSIONED_ASSET = /^duosu-Setup-[\w.-]+\.exe$/
 const LEGACY_ASSET_NAME = 'dosu-Setup.exe'
 
 type Release = { assets: { name: string; url: string; browser_download_url: string }[] }
 
 function pickInstaller(release: Release) {
-  // Releases built before the rename still ship the old installer name.
+  // Older releases ship an unversioned installer, or the pre-rename name.
   return (
-    release.assets.find((a) => a.name === ASSET_NAME) ?? release.assets.find((a) => a.name === LEGACY_ASSET_NAME)
+    release.assets.find((a) => VERSIONED_ASSET.test(a.name)) ??
+    release.assets.find((a) => a.name === ASSET_NAME) ??
+    release.assets.find((a) => a.name === LEGACY_ASSET_NAME)
   )
 }
 

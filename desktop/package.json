@@ -34,7 +34,7 @@
     "win": {
       "target": ["nsis"],
       "executableName": "duosu",
-      "artifactName": "duosu-Setup.${ext}"
+      "artifactName": "duosu-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
