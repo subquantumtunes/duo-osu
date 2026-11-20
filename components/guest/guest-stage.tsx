@@ -6,8 +6,8 @@ import type { Skin } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 import type { CursorSettings } from '@/lib/cursor-settings'
 import { Playfield } from './playfield'
-import { LanePlayfield } from './lane-playfield'
-import { RULESET_TAIKO, laneName } from '@/lib/lanes'
+import { type LaneInput, LanePlayfield } from './lane-playfield'
+import { RULESET_MANIA, RULESET_TAIKO, laneName } from '@/lib/lanes'
 import { Eye, EyeOff, Maximize, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KeyLights } from '@/components/key-lights'
@@ -81,6 +81,7 @@ export function GuestStage({
   const [pressed, setPressed] = useState<Partial<Record<TapSlot, boolean>>>({})
   const held = useRef(new Map<TapSlot, Set<Source>>())
   const lanePressedRef = useRef<boolean[]>([])
+  const laneInputsRef = useRef<LaneInput[]>([])
   const cursorRef = useRef<{ x: number; y: number } | null>(null)
   const cursorStyleRef = useRef<CursorSettings>(cursorStyle)
   cursorStyleRef.current = cursorStyle
@@ -148,7 +149,13 @@ export function GuestStage({
       if (wasDown !== isDown) {
         sendKey(slot, isDown)
         const lane = /^l(\d)$/.exec(slot)
-        if (lane) lanePressedRef.current[Number(lane[1])] = isDown
+        if (lane) {
+          lanePressedRef.current[Number(lane[1])] = isDown
+          const inputs = laneInputsRef.current
+          // The renderer drains this every frame; trim it if nothing is drawing.
+          if (inputs.length > 64) inputs.splice(0, inputs.length - 64)
+          inputs.push({ lane: Number(lane[1]), down: isDown, at: performance.now() })
+        }
         setPressed((p) => ({ ...p, [slot]: isDown }))
       }
     },
@@ -160,6 +167,8 @@ export function GuestStage({
       if (set.size > 0) {
         set.clear()
         sendKey(slot, false)
+        const lane = /^l(\d)$/.exec(slot)
+        if (lane) laneInputsRef.current.push({ lane: Number(lane[1]), down: false, at: performance.now() })
       }
     }
     lanePressedRef.current = []
@@ -270,9 +279,17 @@ export function GuestStage({
           <LanePlayfield
             map={playfield.map}
             mods={playfield.mods}
+            skin={playfield.skin}
             clockRef={playfield.clockRef}
             leadMsRef={playfield.leadMsRef}
-            view={{ ruleset: playfield.laneRuleset, lanes: laneControls.lanes, pressedRef: lanePressedRef }}
+            videoRef={videoRef}
+            view={{
+              ruleset: playfield.laneRuleset,
+              lanes: laneControls.lanes,
+              pressedRef: lanePressedRef,
+              inputsRef: laneInputsRef,
+              blackoutRef,
+            }}
           />
         )}
         {playfield && playfield.laneRuleset === undefined && (
@@ -330,10 +347,16 @@ export function GuestStage({
               Unmute
             </Button>
           )}
-          {playfield && (
+          {playfield && playfield.laneRuleset !== RULESET_TAIKO && (
             <Button variant="outline" aria-pressed={blackout} onClick={toggleBlackout}>
               {blackout ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
-              {blackout ? 'Show stream playfield' : 'Black out stream playfield'}
+              {playfield.laneRuleset === RULESET_MANIA
+                ? blackout
+                  ? "Show host's columns"
+                  : "Black out host's columns"
+                : blackout
+                  ? 'Show stream playfield'
+                  : 'Black out stream playfield'}
             </Button>
           )}
           <Button variant="outline" onClick={() => stageRef.current?.requestFullscreen()}>
