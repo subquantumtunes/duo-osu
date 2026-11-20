@@ -344,7 +344,8 @@ function drawMania(
   }
 
   const yFor = (t: number) => judgeY - (scrollPosition(scroll, t) - nowPos) * pxPerSongMs
-  const noteH = Math.max(6, 12 * unit)
+  const thickness = (settings?.maniaNoteThickness ?? 100) / 100
+  const noteH = Math.max(3, Math.max(6, 12 * unit) * thickness)
   const start = firstVisible(map.notes, time - MANIA_WINDOW_MS - MISS_FADE_MS)
   for (let i = start; i < map.notes.length; i++) {
     const note = map.notes[i]

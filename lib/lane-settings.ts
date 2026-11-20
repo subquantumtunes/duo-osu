@@ -20,6 +20,8 @@ export type LaneSettings = {
   maniaStageScale: number
   /** Horizontal nudge of the mania stage, in osu!'s 480-tall playfield units. */
   maniaStageOffset: number
+  /** Vertical thickness of mania notes as a percentage of the default. */
+  maniaNoteThickness: number
   /** Hue for every mania note, or null to use the host skin's note colours. */
   maniaNoteHue: number | null
   /** Colour of the partner's mania lanes: hue in degrees, brightness 0 (black) to 100, opacity 0 to 100. */
@@ -37,6 +39,7 @@ export const DEFAULT_LANE_SETTINGS: LaneSettings = {
   streamBackground: false,
   maniaStageScale: 100,
   maniaStageOffset: 0,
+  maniaNoteThickness: 100,
   maniaNoteHue: null,
   laneHue: 320,
   laneBrightness: 8,
@@ -46,6 +49,8 @@ export const DEFAULT_LANE_SETTINGS: LaneSettings = {
 export const STAGE_SCALE_MIN = 80
 export const STAGE_SCALE_MAX = 140
 export const STAGE_OFFSET_MAX = 40
+export const NOTE_THICKNESS_MIN = 50
+export const NOTE_THICKNESS_MAX = 400
 
 export function noteHueColor(hue: number) {
   return `hsl(${hue} 90% 65%)`
