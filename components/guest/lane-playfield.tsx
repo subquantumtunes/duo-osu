@@ -4,7 +4,7 @@ import { type RefObject, useEffect, useRef } from 'react'
 import type { Beatmap, DrumNote, ManiaNote } from '@/lib/beatmap'
 import { MOD_HIDDEN, scrollPosition } from '@/lib/beatmap'
 import { RULESET_TAIKO } from '@/lib/lanes'
-import { DEFAULT_JUDGE_Y, type LaneSettings, laneColor, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
+import { DEFAULT_COMBO_Y, DEFAULT_JUDGE_Y, type LaneSettings, laneColor, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
 import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 import { type ComboState, JUDGEMENT_MS, type JudgementEvent, drawCombo, drawJudgement } from '@/lib/judgements'
@@ -517,7 +517,9 @@ export function LanePlayfield({
             const trackH = Math.min((200 / 768) * content.height * Math.max(1, aspect / (16 / 9)), content.height / 3)
             drawCombo(ctx, combo, content.left + 72 * unit, content.top + 135 * unit + trackH / 2, 24 * unit, now)
           } else {
-            drawCombo(ctx, combo, x, maniaY - 40 * unit, 34 * unit, now)
+            const comboY =
+              content.top + content.height * ((current.settingsRef.current?.maniaComboY ?? DEFAULT_COMBO_Y) / 100)
+            drawCombo(ctx, combo, x, comboY, 34 * unit, now)
           }
         }
       }
