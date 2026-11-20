@@ -9,6 +9,8 @@ import {
   MANIA_SPEED_MIN,
   noteHueColor,
   STAGE_OFFSET_MAX,
+  NOTE_THICKNESS_MAX,
+  NOTE_THICKNESS_MIN,
   STAGE_SCALE_MAX,
   STAGE_SCALE_MIN,
 } from '@/lib/lane-settings'
@@ -175,6 +177,17 @@ export function LaneSettingsPanel({
             value={settings.maniaStageOffset}
             onChange={(maniaStageOffset) => onChange({ maniaStageOffset })}
             hint="Nudge the stage left or right to line it up with the host's."
+          />
+
+          <RangeSetting
+            id={`${id}-thickness`}
+            label="Note thickness"
+            display={`${settings.maniaNoteThickness}%`}
+            min={NOTE_THICKNESS_MIN}
+            max={NOTE_THICKNESS_MAX}
+            value={settings.maniaNoteThickness}
+            onChange={(maniaNoteThickness) => onChange({ maniaNoteThickness })}
+            hint="Makes each note taller. Hold notes keep their length."
           />
 
           <div className="flex flex-col gap-2">
