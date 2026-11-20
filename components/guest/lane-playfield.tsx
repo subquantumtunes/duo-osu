@@ -4,9 +4,10 @@ import { type RefObject, useEffect, useRef } from 'react'
 import type { Beatmap, DrumNote, ManiaNote } from '@/lib/beatmap'
 import { MOD_HIDDEN, scrollPosition } from '@/lib/beatmap'
 import { RULESET_TAIKO } from '@/lib/lanes'
-import { type LaneSettings, laneColor, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
+import { DEFAULT_JUDGE_Y, type LaneSettings, laneColor, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
 import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
+import { type ComboState, JUDGEMENT_MS, type JudgementEvent, drawCombo, drawJudgement } from '@/lib/judgements'
 
 const DON = '#eb4f4f'
 const KAT = '#4fa9eb'
@@ -37,6 +38,11 @@ export type LaneView = {
   blackoutRef: RefObject<ManiaBlackout>
   /** The partner's own scroll speeds, independent of the host's. */
   settingsRef: RefObject<LaneSettings>
+  /** 100/50/miss judgements from the host's osu!. */
+  judgementsRef?: RefObject<JudgementEvent[]>
+  /** The host's combo, drawn with the judgements. */
+  comboRef?: RefObject<ComboState>
+  judgementsOnRef?: RefObject<boolean>
 }
 
 type Rect = { left: number; top: number; width: number; height: number }
@@ -488,6 +494,33 @@ export function LanePlayfield({
       ctx.clip()
       if (taiko()) drawTaiko(ctx, content, map, judge, time, current, hidden)
       else drawMania(ctx, content, map, skinRef.current, judge, time, clock.rate || 1, current, hidden)
+      const events = current.judgementsOnRef?.current ? current.judgementsRef?.current : null
+      if (events) {
+        const now = performance.now()
+        const unit = content.height / 480
+        // Taiko shows judgements above the hit circle; mania on the stage at the partner's chosen height.
+        const x = taiko()
+          ? content.left + 160 * unit
+          : content.left + content.width / 2 + (current.settingsRef.current?.maniaStageOffset ?? 0) * unit
+        const maniaY =
+          content.top + content.height * ((current.settingsRef.current?.maniaJudgeY ?? DEFAULT_JUDGE_Y) / 100)
+        const y = taiko() ? content.top + 110 * unit : maniaY
+        for (const event of events) {
+          if (now - event.shown > JUDGEMENT_MS) continue
+          drawJudgement(ctx, event, current.ruleset, x, y, (taiko() ? 26 : 30) * unit, now)
+        }
+        const combo = current.comboRef?.current
+        if (combo) {
+          if (taiko()) {
+            // osu!taiko keeps the combo in the drum to the left of the hit circle.
+            const aspect = content.width / content.height
+            const trackH = Math.min((200 / 768) * content.height * Math.max(1, aspect / (16 / 9)), content.height / 3)
+            drawCombo(ctx, combo, content.left + 72 * unit, content.top + 135 * unit + trackH / 2, 24 * unit, now)
+          } else {
+            drawCombo(ctx, combo, x, maniaY - 40 * unit, 34 * unit, now)
+          }
+        }
+      }
       ctx.restore()
     }
     frame = requestAnimationFrame(draw)

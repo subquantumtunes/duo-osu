@@ -7,7 +7,69 @@ type CaptureCtor = new () => Capture
 const POLL_MS = 2000
 const PROCESS_NAMES = ['osu!.exe']
 
+type ProcessFinder = (names: string[]) => number | null
+
+let nativeFinder: ProcessFinder | null | undefined
+
+/**
+ * Lists processes through Toolhelp32 instead of launching tasklist.exe. Spawning a console process
+ * every poll can briefly take the foreground, which knocks a fullscreen osu! out and pauses it.
+ */
+function loadNativeFinder(): ProcessFinder | null {
+  if (nativeFinder !== undefined) return nativeFinder
+  nativeFinder = null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const koffi = require('koffi') as typeof import('koffi')
+    const ENTRY = koffi.struct('DUOSU_PROCESSENTRY32W', {
+      dwSize: 'uint32',
+      cntUsage: 'uint32',
+      th32ProcessID: 'uint32',
+      th32DefaultHeapID: 'uintptr_t',
+      th32ModuleID: 'uint32',
+      cntThreads: 'uint32',
+      th32ParentProcessID: 'uint32',
+      pcPriClassBase: 'int32',
+      dwFlags: 'uint32',
+      szExeFile: koffi.array('char16_t', 260, 'String'),
+    })
+    const kernel32 = koffi.load('kernel32.dll')
+    const CreateToolhelp32Snapshot = kernel32.func('__stdcall', 'CreateToolhelp32Snapshot', 'intptr_t', ['uint32', 'uint32'])
+    const Process32FirstW = kernel32.func('__stdcall', 'Process32FirstW', 'bool', ['intptr_t', koffi.inout(koffi.pointer(ENTRY))])
+    const Process32NextW = kernel32.func('__stdcall', 'Process32NextW', 'bool', ['intptr_t', koffi.inout(koffi.pointer(ENTRY))])
+    const CloseHandle = kernel32.func('__stdcall', 'CloseHandle', 'bool', ['intptr_t'])
+    const TH32CS_SNAPPROCESS = 0x2
+    const size = koffi.sizeof(ENTRY)
+
+    nativeFinder = (names) => {
+      const snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) as number
+      if (snapshot === -1 || snapshot === 0) return null
+      try {
+        const entry = { dwSize: size } as { dwSize: number; th32ProcessID: number; szExeFile: string }
+        let ok = Process32FirstW(snapshot, entry) as boolean
+        while (ok) {
+          if (names.includes(String(entry.szExeFile).toLowerCase())) return entry.th32ProcessID
+          entry.dwSize = size
+          ok = Process32NextW(snapshot, entry) as boolean
+        }
+        return null
+      } finally {
+        CloseHandle(snapshot)
+      }
+    }
+  } catch {
+    nativeFinder = null
+  }
+  return nativeFinder
+}
+
 function findOsuPid(): Promise<number | null> {
+  const native = loadNativeFinder()
+  if (native) {
+    try {
+      return Promise.resolve(native(PROCESS_NAMES))
+    } catch {}
+  }
   return new Promise((resolve) => {
     execFile(
       'tasklist',

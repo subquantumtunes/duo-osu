@@ -758,6 +758,8 @@ async function init() {
   coop.onTime((ms) => session.publishClock(ms, playback.rate, playback.playing))
   coop.onMap((map) => session.publishMap(map.checksum, map.text))
   coop.onSkin((skin) => session.publishSkin(skin))
+  coop.onJudge((judge) => session.publishJudge(judge.j, judge.at))
+  coop.onCombo((combo) => session.publishCombo(combo))
   coop.setClient(settings.client)
 
   const [status, snapshot] = await Promise.all([coop.inputStatus(), coop.osuSnapshot()])
