@@ -3,6 +3,7 @@ import path from 'node:path'
 import {
   app,
   BrowserWindow,
+  clipboard,
   type DesktopCapturerSource,
   desktopCapturer,
   dialog,
@@ -159,6 +160,13 @@ function registerIpc() {
   })
 
   ipcMain.handle(IPC.gameAudioStart, (event) => (fromHostWindow(event) ? gameAudio.start() : null))
+
+  // The renderer's permission handler denies clipboard access, so copy through the main process.
+  ipcMain.handle(IPC.copyText, (event, text: unknown) => {
+    if (!fromHostWindow(event) || typeof text !== 'string' || text.length > 256) return false
+    clipboard.writeText(text)
+    return true
+  })
 
   ipcMain.on(IPC.gameAudioStop, (event) => {
     if (fromHostWindow(event)) gameAudio.stop()

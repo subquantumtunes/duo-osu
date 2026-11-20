@@ -327,9 +327,9 @@ function wireControls() {
 
   $('copy-code').addEventListener('click', async () => {
     if (!session.roomCode) return
-    await navigator.clipboard.writeText(session.roomCode)
+    const copied = await coop.copyText(session.roomCode).catch(() => false)
     const button = $('copy-code')
-    button.textContent = 'Copied'
+    button.textContent = copied ? 'Copied' : 'Copy failed'
     setTimeout(() => (button.textContent = 'Copy code'), 1500)
   })
 

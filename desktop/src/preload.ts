@@ -27,6 +27,7 @@ const api: CoopApi = {
   stopGameAudio: () => ipcRenderer.send(IPC.gameAudioStop),
   onGameAudio: (cb) => subscribe(IPC.gameAudio, cb),
   onGameAudioStatus: (cb) => subscribe(IPC.gameAudioStatus, cb),
+  copyText: (text) => ipcRenderer.invoke(IPC.copyText, text),
 }
 
 contextBridge.exposeInMainWorld('coop', api)

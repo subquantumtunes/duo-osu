@@ -52,6 +52,7 @@ export type CoopApi = {
   stopGameAudio(): void
   onGameAudio(cb: (chunk: Uint8Array) => void): () => void
   onGameAudioStatus(cb: (status: GameAudioStatus) => void): () => void
+  copyText(text: string): Promise<boolean>
 }
 
 export const IPC = {
@@ -72,4 +73,5 @@ export const IPC = {
   gameAudioStop: 'coop:game-audio-stop',
   gameAudio: 'coop:game-audio',
   gameAudioStatus: 'coop:game-audio-status',
+  copyText: 'coop:copy-text',
 } as const
