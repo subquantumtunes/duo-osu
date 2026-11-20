@@ -32,9 +32,13 @@ type Settings = {
   taikoKeys: string[]
   /** Column keys per mania key count; counts never edited use osu!'s defaults. */
   maniaKeys: Record<string, string[]>
-  taikoSplit: TaikoSplit
-  maniaSplit: ManiaSplit
+  /** Drums the partner plays; the host keeps the rest. */
+  taikoPartner: number[]
+  /** Columns the partner plays per mania key count; counts never edited use the right-hand default. */
+  maniaPartner: Record<string, number[]>
 } & Quality
+
+type LegacySettings = { taikoSplit?: TaikoSplit; maniaSplit?: ManiaSplit }
 
 const DEFAULTS: Settings = {
   screenId: null,
@@ -45,8 +49,8 @@ const DEFAULTS: Settings = {
   client: 'stable',
   taikoKeys: TAIKO_DEFAULT_KEYS,
   maniaKeys: {},
-  taikoSplit: 'kat',
-  maniaSplit: 'right',
+  taikoPartner: partnerLanes(RULESET_TAIKO, 4, 'kat', 'right'),
+  maniaPartner: {},
   fps: 60,
   height: 720,
   codec: 'h264',
@@ -54,7 +58,17 @@ const DEFAULTS: Settings = {
 
 function loadSettings(): Settings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') }
+    const { taikoSplit, maniaSplit, ...saved } = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings> &
+      LegacySettings
+    const loaded: Settings = { ...DEFAULTS, ...saved }
+    // Carry the old dropdown choices over to per-key ownership.
+    if (taikoSplit && !saved.taikoPartner) loaded.taikoPartner = partnerLanes(RULESET_TAIKO, 4, taikoSplit, 'right')
+    if (maniaSplit && maniaSplit !== 'right' && !saved.maniaPartner) {
+      loaded.maniaPartner = Object.fromEntries(
+        Array.from({ length: MAX_LANES }, (_, i) => [i + 1, partnerLanes(RULESET_MANIA, i + 1, 'kat', maniaSplit)]),
+      )
+    }
+    return loaded
   } catch {
     return DEFAULTS
   }
@@ -119,7 +133,64 @@ function laneKeys(ruleset: number, count: number) {
 function currentLanes() {
   if (!isLaneRuleset(osu.ruleset)) return null
   if (osu.ruleset === RULESET_MANIA && !osu.keys) return null
-  return partnerLanes(osu.ruleset, osu.keys, settings.taikoSplit, settings.maniaSplit)
+  return partnerFor(osu.ruleset, laneCount(osu.ruleset, osu.keys))
+}
+
+function maniaPartnerFor(count: number) {
+  const saved = settings.maniaPartner[count]
+  return saved ? saved.filter((lane) => lane >= 0 && lane < count) : partnerLanes(RULESET_MANIA, count, 'kat', 'right')
+}
+
+function partnerFor(ruleset: number, count: number) {
+  return ruleset === RULESET_TAIKO ? settings.taikoPartner.filter((lane) => lane >= 0 && lane < 4) : maniaPartnerFor(count)
+}
+
+type Owner = 'host' | 'partner'
+
+function setLaneOwner(id: string, owner: Owner) {
+  const [kind, index] = id.split(':')
+  const lane = Number(index)
+  const ruleset = kind === 'taiko' ? RULESET_TAIKO : RULESET_MANIA
+  const current = partnerFor(ruleset, maniaCount)
+  const next = owner === 'partner' ? [...new Set([...current, lane])].sort((a, b) => a - b) : current.filter((l) => l !== lane)
+  if (kind === 'taiko') settings.taikoPartner = next
+  else settings.maniaPartner = { ...settings.maniaPartner, [maniaCount]: next }
+  saveSettings()
+  // A lane changing hands mid-hold would otherwise stay pressed.
+  coop.release()
+  keys = {}
+  publishSync()
+  render()
+}
+
+let laneMenuFor: string | null = null
+
+function openLaneMenu(button: HTMLElement) {
+  const id = button.dataset.lane
+  if (!id) return
+  listening = null
+  laneMenuFor = id
+  const menu = $('lane-menu')
+  const owner: Owner = button.hasAttribute('data-partner') ? 'partner' : 'host'
+  $('lane-menu-title').textContent = button.title
+  for (const item of menu.querySelectorAll<HTMLButtonElement>('[data-owner]')) {
+    item.setAttribute('aria-checked', String(item.dataset.owner === owner))
+  }
+  menu.hidden = false
+  const rect = button.getBoundingClientRect()
+  const left = Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8)
+  const below = rect.bottom + 4 + menu.offsetHeight <= window.innerHeight
+  menu.style.left = `${Math.max(8, left)}px`
+  menu.style.top = `${below ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4}px`
+  menu.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
+}
+
+function closeLaneMenu(restoreFocus = false) {
+  if (!laneMenuFor) return
+  const id = laneMenuFor
+  laneMenuFor = null
+  $('lane-menu').hidden = true
+  if (restoreFocus) document.querySelector<HTMLElement>(`[data-lane="${id}"]`)?.focus()
 }
 
 function publishSync() {
@@ -216,9 +287,19 @@ function laneButtons(container: HTMLElement, prefix: 'taiko' | 'mania', codes: s
       button.className = 'button key'
       button.dataset.lane = id
       const name = prefix === 'taiko' ? laneName(RULESET_TAIKO, lane) : `Column ${lane + 1}`
-      button.textContent = listening === id ? '…' : keyLabel(code)
+      const isPartner = Boolean(partner?.includes(lane))
+      const keyText = document.createElement('span')
+      keyText.textContent = listening === id ? '…' : keyLabel(code)
+      const ownerText = document.createElement('span')
+      ownerText.className = 'lane-owner'
+      ownerText.textContent = isPartner ? 'Partner' : 'Host'
+      button.replaceChildren(keyText, ownerText)
       button.title = name
-      button.setAttribute('aria-label', `${name}: ${keyLabel(code)}${partner?.includes(lane) ? ', played by your partner' : ''}`)
+      button.setAttribute('aria-haspopup', 'menu')
+      button.setAttribute(
+        'aria-label',
+        `${name}: ${keyLabel(code)}, ${isPartner ? 'played by your partner' : 'played by you'}. Right-click to change who plays it.`,
+      )
       button.toggleAttribute('data-listening', listening === id)
       button.toggleAttribute('data-partner', Boolean(partner?.includes(lane)))
       return button
@@ -230,23 +311,17 @@ function renderLanes() {
   const tap = settings.guestRole === 'tap'
   $('lanes').hidden = !tap
   if (!tap) return
-  $<HTMLSelectElement>('taiko-split').value = settings.taikoSplit
-  $<HTMLSelectElement>('mania-split').value = settings.maniaSplit
   $<HTMLSelectElement>('mania-count').value = String(maniaCount)
-  laneButtons($('taiko-keys'), 'taiko', settings.taikoKeys, partnerLanes(RULESET_TAIKO, 4, settings.taikoSplit, settings.maniaSplit))
-  laneButtons(
-    $('mania-keys'),
-    'mania',
-    maniaKeysFor(maniaCount),
-    partnerLanes(RULESET_MANIA, maniaCount, settings.taikoSplit, settings.maniaSplit),
-  )
+  laneButtons($('taiko-keys'), 'taiko', settings.taikoKeys, partnerFor(RULESET_TAIKO, 4))
+  laneButtons($('mania-keys'), 'mania', maniaKeysFor(maniaCount), maniaPartnerFor(maniaCount))
   const lanes = currentLanes()
+  const none = 'nothing yet, right-click a key to give it to them'
   $('lane-hint').textContent =
     osu.ruleset === RULESET_TAIKO
-      ? `osu! is on taiko. Your partner plays: ${lanes?.map((l) => laneName(RULESET_TAIKO, l)).join(', ')}. Highlighted keys are theirs; play the rest yourself.`
+      ? `osu! is on taiko. Your partner plays: ${lanes?.length ? lanes.map((l) => laneName(RULESET_TAIKO, l)).join(', ') : none}. Play the rest yourself.`
       : osu.ruleset === RULESET_MANIA
         ? osu.keys
-          ? `osu! is on mania ${osu.keys}K. Your partner plays columns ${lanes?.map((l) => l + 1).join(', ')}. Play the rest yourself.`
+          ? `osu! is on mania ${osu.keys}K. Your partner plays ${lanes?.length ? `columns ${lanes.map((l) => l + 1).join(', ')}` : none}. Play the rest yourself.`
           : 'osu! is on mania. Pick a map so tosu can report its key count.'
         : osu.ruleset === 2
           ? 'osu!catch isn’t supported yet. Your partner can still press K1 and K2.'
@@ -553,10 +628,48 @@ function wireControls() {
     $(id).addEventListener('click', (event) => {
       const lane = (event.target as HTMLElement).closest<HTMLElement>('[data-lane]')?.dataset.lane
       if (!lane) return
+      closeLaneMenu()
       listening = listening === lane ? null : lane
       render()
     })
+    // Also fires for the Menu key and Shift+F10, so ownership is reachable from the keyboard.
+    $(id).addEventListener('contextmenu', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLElement>('[data-lane]')
+      if (!button) return
+      event.preventDefault()
+      render()
+      const fresh = document.querySelector<HTMLElement>(`[data-lane="${button.dataset.lane}"]`)
+      if (fresh) openLaneMenu(fresh)
+    })
   }
+
+  const laneMenu = $('lane-menu')
+  laneMenu.addEventListener('click', (event) => {
+    const owner = (event.target as HTMLElement).closest<HTMLElement>('[data-owner]')?.dataset.owner as Owner | undefined
+    if (!owner || !laneMenuFor) return
+    const id = laneMenuFor
+    closeLaneMenu()
+    setLaneOwner(id, owner)
+    document.querySelector<HTMLElement>(`[data-lane="${id}"]`)?.focus()
+  })
+  laneMenu.addEventListener('keydown', (event) => {
+    const items = [...laneMenu.querySelectorAll<HTMLButtonElement>('[data-owner]')]
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      items[(at + step + items.length) % items.length]?.focus()
+    } else if (event.key === 'Escape' || event.key === 'Tab') {
+      event.preventDefault()
+      closeLaneMenu(true)
+    }
+  })
+  document.addEventListener('pointerdown', (event) => {
+    if (laneMenuFor && !laneMenu.contains(event.target as Node)) closeLaneMenu()
+  })
+  window.addEventListener('blur', () => closeLaneMenu())
+  window.addEventListener('resize', () => closeLaneMenu())
+  document.addEventListener('scroll', () => closeLaneMenu(), true)
 
   const count = $<HTMLSelectElement>('mania-count')
   count.replaceChildren(
@@ -572,18 +685,6 @@ function wireControls() {
     listening = null
     render()
   })
-
-  const onSplit = () => {
-    settings.taikoSplit = $<HTMLSelectElement>('taiko-split').value as TaikoSplit
-    settings.maniaSplit = $<HTMLSelectElement>('mania-split').value as ManiaSplit
-    saveSettings()
-    coop.release()
-    keys = {}
-    publishSync()
-    render()
-  }
-  $('taiko-split').addEventListener('change', onSplit)
-  $('mania-split').addEventListener('change', onSplit)
 
   $('reset-lanes').addEventListener('click', () => {
     settings.taikoKeys = TAIKO_DEFAULT_KEYS
