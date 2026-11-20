@@ -52,6 +52,11 @@ export class OsuWatcher {
   }
   map: OsuMap | null = null
   skin: OsuSkin | null = null
+  /**
+   * When the song clock last changed (performance.now()). osu! keeps reporting "playing" on the
+   * pause menu, so a clock that has stopped moving is how a pause shows up.
+   */
+  clockMovedAt = 0
   private lazerFiles: string | null = null
   private skinId: string | null = null
   private skinLoading = false
@@ -266,8 +271,9 @@ export class OsuWatcher {
 
   private time(value: unknown) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return
-    this.songTime = value
     const now = performance.now()
+    if (value !== this.songTime) this.clockMovedAt = now
+    this.songTime = value
     if (now - this.lastTimeSent < MIN_TIME_INTERVAL_MS) return
     this.lastTimeSent = now
     this.events.time(value)
