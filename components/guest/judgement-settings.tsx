@@ -2,12 +2,14 @@
 
 import { useId } from 'react'
 import {
+  JUDGEMENT_KINDS,
   JUDGEMENT_DURATION_MAX,
   JUDGEMENT_DURATION_MIN,
   JUDGEMENT_OPACITY_MAX,
   JUDGEMENT_OPACITY_MIN,
   JUDGEMENT_SIZE_MAX,
   JUDGEMENT_SIZE_MIN,
+  type JudgementKind,
   type JudgementStyle,
 } from '@/lib/judgements'
 import { Toggle } from './cursor-settings'
@@ -28,11 +30,32 @@ export function JudgementSettingsPanel({
     >
       <Toggle label="Show judgements" checked={style.on} onChange={(on) => onChange({ on })} />
       <p className="text-xs text-muted-foreground">
-        Draws the host&apos;s 100, 50, and miss judgements on your copy of the map using the host&apos;s skin.
-        300s aren&apos;t shown.
+        Draws the host&apos;s 100, 50, and miss judgements on your copy of the map. 300s aren&apos;t shown.
       </p>
       {style.on && (
         <>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${id}-kind`} className="text-sm font-medium">
+              Style
+            </label>
+            <select
+              id={`${id}-kind`}
+              value={style.kind}
+              onChange={(e) => onChange({ kind: e.target.value as JudgementKind })}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {JUDGEMENT_KINDS.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            {style.kind === 'skin' && (
+              <p className="text-xs text-muted-foreground">
+                Falls back to traditional text if the host&apos;s skin has no judgement images.
+              </p>
+            )}
+          </div>
           <RangeSetting
             id={`${id}-size`}
             label="Size"
