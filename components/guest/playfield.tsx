@@ -169,6 +169,69 @@ function drawSliderBody(
   blit(alpha)
 }
 
+/**
+ * Draws a spinner the way stable reads at a glance: a ring filling most of the playfield,
+ * an approach circle shrinking to the centre as time runs out, and a rotating marker.
+ */
+function drawSpinner(
+  ctx: Ctx,
+  obj: HitObject,
+  time: number,
+  center: { x: number; y: number },
+  scale: number,
+  fadeInMs: number,
+) {
+  const fadeIn = Math.min(1, Math.max(0, (time - (obj.time - fadeInMs)) / fadeInMs))
+  const fadeOut = time > obj.end ? 1 - (time - obj.end) / FADE_OUT_MS : 1
+  const alpha = Math.max(0, Math.min(fadeIn, fadeOut))
+  if (alpha <= 0) return
+  const outer = 384 * 0.46 * scale
+  const duration = Math.max(1, obj.end - obj.time)
+  const remaining = Math.min(1, Math.max(0, (obj.end - time) / duration))
+  const lineWidth = Math.max(2, 4 * scale)
+
+  ctx.save()
+  ctx.globalAlpha = alpha
+  ctx.beginPath()
+  ctx.arc(center.x, center.y, outer, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+  ctx.lineWidth = lineWidth
+  ctx.stroke()
+
+  if (time >= obj.time) {
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, Math.max(0.5, outer * remaining), 0, Math.PI * 2)
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = lineWidth * 1.5
+    ctx.stroke()
+
+    const angle = ((time - obj.time) / 1000) * Math.PI * 3
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, outer * 0.62, angle, angle + Math.PI * 0.6)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'
+    ctx.lineWidth = lineWidth * 2
+    ctx.lineCap = 'round'
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, outer * 0.62, angle + Math.PI, angle + Math.PI * 1.6)
+    ctx.stroke()
+  }
+
+  ctx.beginPath()
+  ctx.arc(center.x, center.y, 6 * scale, 0, Math.PI * 2)
+  ctx.fillStyle = '#fff'
+  ctx.fill()
+
+  ctx.font = `700 ${Math.round(28 * scale)}px Geist, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#fff'
+  ctx.fillText(time < obj.time ? 'Spin!' : 'SPIN', center.x, center.y + outer * 0.3)
+  ctx.restore()
+}
+
 /** Circle radius at CS 4, the size adaptive cursors are tuned for. */
 const CS4_RADIUS = 54.4 - 4.48 * 4
 const TRAIL_MS = 120
@@ -314,7 +377,11 @@ export function Playfield({
       const visible: HitObject[] = []
       for (const obj of map.objects) {
         if (obj.time - diff.preempt > time) break
-        if (obj.kind === 'spinner' || obj.end + FADE_OUT_MS < time) continue
+        if (obj.end + FADE_OUT_MS < time) continue
+        if (obj.kind === 'spinner') {
+          drawSpinner(ctx, obj, time, toScreen(256, 192), field.scale, diff.fadeIn)
+          continue
+        }
         visible.push(obj)
       }
 
