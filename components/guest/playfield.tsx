@@ -279,6 +279,50 @@ function drawTrail(ctx: Ctx, trail: TrailPoint[], now: number, hue: number, unit
   ctx.restore()
 }
 
+/** Longest the autopilot cursor spends gliding to the next object, so it waits out breaks. */
+const AUTOPILOT_MAX_MOVE_MS = 1000
+const SPINNER_AUTOPILOT_RADIUS = 50
+const SPINNER_AUTOPILOT_SPEED = (Math.PI * 2) / 120
+
+function endPosition(obj: HitObject) {
+  if (obj.kind === 'spinner') return { x: 256, y: 192 }
+  return (obj.kind === 'slider' && sliderBallAt(obj, obj.end)) || { x: obj.x, y: obj.y }
+}
+
+function startPosition(obj: HitObject) {
+  return obj.kind === 'spinner' ? { x: 256, y: 192 - SPINNER_AUTOPILOT_RADIUS } : { x: obj.x, y: obj.y }
+}
+
+/** Where osu!'s autopilot would hold the cursor at `time`, in osu!pixels. */
+function autopilotAt(objects: HitObject[], time: number) {
+  if (objects.length === 0) return null
+  let lo = 0
+  let hi = objects.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (objects[mid].time <= time) lo = mid + 1
+    else hi = mid
+  }
+  const current = objects[lo - 1]
+  const next = objects[lo]
+  if (current && time <= current.end) {
+    if (current.kind === 'spinner') {
+      const angle = (time - current.time) * SPINNER_AUTOPILOT_SPEED - Math.PI / 2
+      return { x: 256 + Math.cos(angle) * SPINNER_AUTOPILOT_RADIUS, y: 192 + Math.sin(angle) * SPINNER_AUTOPILOT_RADIUS }
+    }
+    return (current.kind === 'slider' && sliderBallAt(current, time)) || { x: current.x, y: current.y }
+  }
+  if (!next) return endPosition(current)
+  const to = startPosition(next)
+  if (!current) return to
+  const from = endPosition(current)
+  const moveStart = Math.max(current.end, next.time - AUTOPILOT_MAX_MOVE_MS)
+  const span = next.time - moveStart
+  const t = span <= 0 ? 1 : Math.min(1, Math.max(0, (time - moveStart) / span))
+  const eased = t * t * (3 - 2 * t)
+  return { x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased }
+}
+
 type Rect = { left: number; top: number; width: number; height: number }
 
 /** Where osu! stable puts its 512x384 playfield inside a fullscreen game of the given size. */
@@ -312,9 +356,15 @@ export function Playfield({
   cursorRef,
   cursorStyleRef,
   blackoutRef,
+  blackoutOpacityRef,
+  autopilotRef,
 }: {
   /** When true, the stream behind the playfield is painted black. Read every frame. */
   blackoutRef?: RefObject<boolean>
+  /** 0..1 opacity of that blackout. Read every frame. */
+  blackoutOpacityRef?: RefObject<number>
+  /** When true and there's no partner aim, draw osu!'s autopilot path as the cursor. */
+  autopilotRef?: RefObject<boolean>
   /** The partner's own aim, 0..1 across the video, drawn above the notes. */
   cursorRef?: RefObject<{ x: number; y: number } | null>
   /** Read every frame, so changing the look never restarts the drawing loop. */
@@ -363,8 +413,10 @@ export function Playfield({
       if (blackoutRef?.current) {
         // Covers the stream's own circles (plus the radius they can overhang the playfield) so a
         // lagging picture can't be mistaken for the locally drawn notes. The HUD stays visible.
+        ctx.globalAlpha = Math.min(1, Math.max(0, blackoutOpacityRef?.current ?? 1))
         ctx.fillStyle = '#000'
         ctx.fillRect(field.left - radius, field.top - radius, 512 * field.scale + radius * 2, 384 * field.scale + radius * 2)
+        ctx.globalAlpha = 1
       }
       const time = clock.at(performance.now()) + clock.rate * (leadMsRef.current ?? 0)
       const toScreen = (x: number, y: number) => ({
@@ -517,15 +569,24 @@ export function Playfield({
       ctx.globalAlpha = 1
       const aim = cursorRef?.current
       const now = performance.now()
-      if (!aim) {
-        trail.length = 0
-        return
+      let ax: number
+      let ay: number
+      if (aim) {
+        ax = content.left + aim.x * content.width
+        ay = content.top + aim.y * content.height
+      } else {
+        const auto = autopilotRef?.current ? autopilotAt(map.objects, time) : null
+        if (!auto) {
+          trail.length = 0
+          return
+        }
+        const s = toScreen(auto.x, auto.y)
+        ax = s.x
+        ay = s.y
       }
       const style = cursorStyleRef?.current ?? DEFAULT_CURSOR
       const adaptive = style.adaptive ? diff.radius / CS4_RADIUS : 1
       const cursorUnit = ((field.scale * 480) / 768) * style.size * adaptive
-      const ax = content.left + aim.x * content.width
-      const ay = content.top + aim.y * content.height
       const last = trail[trail.length - 1]
       if (!last || last.x !== ax || last.y !== ay) trail.push({ x: ax, y: ay, t: now })
       else last.t = now
@@ -536,7 +597,7 @@ export function Playfield({
 
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [map, mods, clockRef, leadMsRef, videoRef, skin, cursorRef, cursorStyleRef])
+  }, [map, mods, clockRef, leadMsRef, videoRef, skin, cursorRef, cursorStyleRef, blackoutRef, blackoutOpacityRef, autopilotRef])
 
   return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 size-full" />
 }

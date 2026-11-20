@@ -14,6 +14,7 @@ import { KeyLights } from '@/components/key-lights'
 import { type Role, type TapSlot, type VideoIssue, formatKey, laneSlot } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
 import type { LaneSettings, ManiaBlackout } from '@/lib/lane-settings'
+import type { StandardSettings } from '@/lib/standard-settings'
 import { VideoIssueOverlay } from './video-issue'
 
 type Source = 'keyboard' | 'mouse'
@@ -63,7 +64,9 @@ export function GuestStage({
   inputLive,
   laneControls,
   laneSettings,
+  standardSettings,
 }: {
+  standardSettings: StandardSettings
   laneSettings: LaneSettings
   laneControls: LaneControls | null
   inputLive: boolean
@@ -92,6 +95,10 @@ export function GuestStage({
   const blackoutRef = useRef(false)
   // The setting is remembered, but only applied while a map is live so song select stays visible.
   blackoutRef.current = blackout && inputLive
+  const blackoutOpacityRef = useRef(standardSettings.blackoutOpacity)
+  blackoutOpacityRef.current = standardSettings.blackoutOpacity
+  const autopilotRef = useRef(false)
+  autopilotRef.current = role === 'tap' && standardSettings.autopilot && inputLive
   const laneSettingsRef = useRef(laneSettings)
   laneSettingsRef.current = laneSettings
   const maniaBlackoutRef = useRef<ManiaBlackout>('off')
@@ -312,6 +319,8 @@ export function GuestStage({
             cursorRef={role === 'aim' ? cursorRef : undefined}
             cursorStyleRef={cursorStyleRef}
             blackoutRef={blackoutRef}
+            blackoutOpacityRef={blackoutOpacityRef}
+            autopilotRef={autopilotRef}
           />
         )}
         {!playfield && videoIssue && videoIssue !== 'connecting' ? (
