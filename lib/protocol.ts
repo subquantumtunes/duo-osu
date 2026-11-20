@@ -68,6 +68,8 @@ export type HostMessage =
     }
   /** A 100, 50 or miss osu! just counted, at the host's song time `at`. 300s aren't sent. */
   | { t: 'judge'; j: 100 | 50 | 0; at: number }
+  /** The host's current combo, sent when it changes; 0 outside a play. */
+  | { t: 'combo'; c: number }
   | { t: 'map'; id: string; i: number; n: number; d: string }
   | { t: 'skin'; id: string; i: number; n: number; d: string }
 

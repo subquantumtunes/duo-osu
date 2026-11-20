@@ -292,6 +292,10 @@ export class HostSession {
     if (this.ctrl?.open) this.ctrl.send({ t: 'judge', j, at } satisfies HostMessage)
   }
 
+  publishCombo(c: number) {
+    if (this.ctrl?.open) this.ctrl.send({ t: 'combo', c } satisfies HostMessage)
+  }
+
   publishClock(time: number, rate: number, playing: boolean) {
     const input = this.input
     if (input?.readyState !== 'open' || input.bufferedAmount > 1024) return

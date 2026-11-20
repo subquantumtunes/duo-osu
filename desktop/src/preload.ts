@@ -26,6 +26,7 @@ const api: CoopApi = {
   onMap: (cb) => subscribe(IPC.map, cb),
   onSkin: (cb) => subscribe(IPC.skin, cb),
   onJudge: (cb) => subscribe(IPC.judge, cb),
+  onCombo: (cb) => subscribe(IPC.combo, cb),
   startGameAudio: () => ipcRenderer.invoke(IPC.gameAudioStart),
   stopGameAudio: () => ipcRenderer.send(IPC.gameAudioStop),
   onGameAudio: (cb) => subscribe(IPC.gameAudio, cb),

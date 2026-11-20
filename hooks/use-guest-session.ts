@@ -24,7 +24,7 @@ import { type Beatmap, parseBeatmap } from '@/lib/beatmap'
 import { type Skin, closeSkin, loadSkin } from '@/lib/skin'
 import { SyncClock } from '@/lib/sync-clock'
 import { type PartnerMode, SOURCE_LAG_MS } from '@/lib/timing'
-import { isJudgement, type JudgementEvent, pushJudgement } from '@/lib/judgements'
+import { type ComboState, isJudgement, type JudgementEvent, pushJudgement, setCombo } from '@/lib/judgements'
 
 // One frame of capture plus encode on the host before a frame is even sent.
 const CAPTURE_ENCODE_MS = 17
@@ -139,6 +139,7 @@ export function useGuestSession(code: string) {
 
   const clockRef = useRef(new SyncClock())
   const judgementsRef = useRef<JudgementEvent[]>([])
+  const comboRef = useRef<ComboState>({ value: 0, changed: 0 })
   const transitRef = useRef(0)
   const modeRef = useRef<PartnerMode>('video')
   const videoLatencyRef = useRef<number | null>(null)
@@ -326,6 +327,8 @@ export function useGuestSession(code: string) {
           })
         } else if (msg.t === 'judge') {
           if (isJudgement(msg.j) && Number.isFinite(msg.at)) pushJudgement(judgementsRef.current, msg.j, msg.at)
+        } else if (msg.t === 'combo') {
+          if (typeof msg.c === 'number' && Number.isFinite(msg.c) && msg.c >= 0) setCombo(comboRef.current, Math.floor(msg.c))
         } else if (msg.t === 'map') {
           receiveMapChunk(msg)
         } else if (msg.t === 'skin') {
@@ -550,6 +553,7 @@ export function useGuestSession(code: string) {
     retryVideo,
     clockRef,
     judgementsRef,
+    comboRef,
     transitRef,
     setMode,
     join,

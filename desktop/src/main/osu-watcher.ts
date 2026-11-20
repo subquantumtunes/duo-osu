@@ -28,6 +28,8 @@ type Events = {
   skin(skin: OsuSkin): void
   /** A 100, 50 or miss (0) osu! just counted, at song time `at`. */
   judge(j: 100 | 50 | 0, at: number): void
+  /** The current combo, sent when it changes; 0 outside a play. */
+  combo(value: number): void
 }
 
 const MAX_JUDGES_PER_UPDATE = 4
@@ -66,6 +68,7 @@ export class OsuWatcher {
   private lastTimeSent = 0
   private songTime = 0
   private hits: { h100: number; h50: number; miss: number } | null = null
+  private combo = -1
   private stopped = false
   private sockets = new Set<WebSocket>()
 
@@ -182,6 +185,7 @@ export class OsuWatcher {
         ])
         if (!this.precise) this.time(data.beatmap?.time?.live)
         this.trackHits(state, data.play?.hits)
+        this.trackCombo(state, data.play?.combo?.current)
         if (this.status.client === 'stable') {
           const skinName = data.folders?.skin
           const game = data.folders?.game
@@ -251,6 +255,13 @@ export class OsuWatcher {
     emit(0, next.miss - prev.miss)
     emit(50, next.h50 - prev.h50)
     emit(100, next.h100 - prev.h100)
+  }
+
+  private trackCombo(state: number | null, value: unknown) {
+    const next = state === PLAYING ? Math.floor(countOf(value)) : 0
+    if (next === this.combo) return
+    this.combo = next
+    this.events.combo(next)
   }
 
   private time(value: unknown) {

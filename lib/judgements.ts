@@ -61,6 +61,41 @@ export function drawJudgement(
   ctx.restore()
 }
 
+/** The host's combo; `changed` is the partner's `performance.now()` when it last went up. */
+export type ComboState = { value: number; changed: number }
+
+export function setCombo(state: ComboState, value: number) {
+  if (value > state.value) state.changed = performance.now()
+  state.value = value
+}
+
+/** osu!'s combo counter: hidden below 2, with a short bump each time it goes up. */
+export function drawCombo(
+  ctx: CanvasRenderingContext2D,
+  combo: ComboState,
+  x: number,
+  y: number,
+  size: number,
+  now: number,
+) {
+  if (combo.value < 2) return
+  const age = now - combo.changed
+  const bump = age >= 0 && age < 120 ? 1.18 - (age / 120) * 0.18 : 1
+  const px = size * bump
+  ctx.save()
+  ctx.font = `800 ${Math.round(px)}px ui-sans-serif, system-ui, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = Math.max(2, px * 0.12)
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)'
+  const label = String(combo.value)
+  ctx.strokeText(label, x, y)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(label, x, y)
+  ctx.restore()
+}
+
 const STORAGE_KEY = 'duosu:judgements'
 
 /** Whether the partner sees 100/50/miss judgements on their copy of the map; remembered on this device. */

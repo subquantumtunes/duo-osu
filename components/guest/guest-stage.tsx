@@ -15,7 +15,7 @@ import { type Role, type TapSlot, type VideoIssue, formatKey, laneSlot } from '@
 import { cn } from '@/lib/utils'
 import type { LaneSettings, ManiaBlackout } from '@/lib/lane-settings'
 import type { StandardSettings } from '@/lib/standard-settings'
-import type { JudgementEvent } from '@/lib/judgements'
+import type { ComboState, JudgementEvent } from '@/lib/judgements'
 import { VideoIssueOverlay } from './video-issue'
 
 type Source = 'keyboard' | 'mouse'
@@ -46,6 +46,7 @@ export type PlayfieldProps = {
   leadMsRef: RefObject<number>
   skin: Skin | null
   judgementsRef?: RefObject<JudgementEvent[]>
+  comboRef?: RefObject<ComboState>
   /** Set for taiko and mania, which draw drums or columns instead of the standard playfield. */
   laneRuleset?: number
 }
@@ -316,6 +317,7 @@ export function GuestStage({
               blackoutRef: maniaBlackoutRef,
               settingsRef: laneSettingsRef,
               judgementsRef: playfield.judgementsRef,
+              comboRef: playfield.comboRef,
               judgementsOnRef,
             }}
           />

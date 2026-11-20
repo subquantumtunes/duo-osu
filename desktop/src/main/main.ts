@@ -90,6 +90,7 @@ const watcher = new OsuWatcher(TOSU_PORT, {
   map: (map) => send(IPC.map, map),
   skin: (skin) => send(IPC.skin, skin),
   judge: (j, at) => send(IPC.judge, { j, at }),
+  combo: (value) => send(IPC.combo, value),
 })
 
 const gameAudio = new GameAudio(

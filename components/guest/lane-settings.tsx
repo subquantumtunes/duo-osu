@@ -9,6 +9,8 @@ import {
   MANIA_SPEED_MIN,
   noteHueColor,
   STAGE_OFFSET_MAX,
+  JUDGE_Y_MAX,
+  JUDGE_Y_MIN,
   NOTE_THICKNESS_MAX,
   NOTE_THICKNESS_MIN,
   STAGE_SCALE_MAX,
@@ -188,6 +190,17 @@ export function LaneSettingsPanel({
             value={settings.maniaNoteThickness}
             onChange={(maniaNoteThickness) => onChange({ maniaNoteThickness })}
             hint="Makes each note taller. Hold notes keep their length."
+          />
+
+          <RangeSetting
+            id={`${id}-judge-y`}
+            label="Judgement & combo height"
+            display={`${settings.maniaJudgeY}%`}
+            min={JUDGE_Y_MIN}
+            max={JUDGE_Y_MAX}
+            value={settings.maniaJudgeY}
+            onChange={(maniaJudgeY) => onChange({ maniaJudgeY })}
+            hint="Moves the judgements and combo counter up or down the stage. Lower is higher on screen."
           />
 
           <div className="flex flex-col gap-2">

@@ -146,6 +146,7 @@ export function GuestRoom({ code }: { code: string }) {
                       leadMsRef,
                       skin: session.skin,
                       judgementsRef: session.judgementsRef,
+                      comboRef: session.comboRef,
                       laneRuleset: laneMode ?? undefined,
                     }
                   : null
