@@ -4,7 +4,7 @@ import { type RefObject, useEffect, useRef } from 'react'
 import { type Beatmap, type HitObject, difficultyFor, sliderBallAt } from '@/lib/beatmap'
 import type { Skin, SkinSprite } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
-import { JUDGEMENT_MS, type JudgementEvent, drawJudgement } from '@/lib/judgements'
+import { type JudgementEvent, type JudgementStyle, drawJudgement } from '@/lib/judgements'
 import { type CursorSettings, DEFAULT_CURSOR, cursorColor } from '@/lib/cursor-settings'
 
 const COMBO_COLORS = ['#ff66aa', '#66ccff', '#ffcc33', '#99ee77']
@@ -376,11 +376,11 @@ export function Playfield({
   blackoutOpacityRef,
   autopilotRef,
   judgementsRef,
-  judgementsOnRef,
+  judgementStyleRef,
 }: {
   /** 100/50/miss judgements from the host's osu!, drawn where the matching object was. */
   judgementsRef?: RefObject<JudgementEvent[]>
-  judgementsOnRef?: RefObject<boolean>
+  judgementStyleRef?: RefObject<JudgementStyle>
   /** When true, the stream behind the playfield is painted black. Read every frame. */
   blackoutRef?: RefObject<boolean>
   /** 0..1 opacity of that blackout. Read every frame. */
@@ -591,17 +591,18 @@ export function Playfield({
       ctx.globalAlpha = 1
       const aim = cursorRef?.current
       const now = performance.now()
-      const events = judgementsOnRef?.current ? judgementsRef?.current : null
-      if (events) {
+      const judgementStyle = judgementStyleRef?.current
+      const events = judgementStyle?.on ? judgementsRef?.current : null
+      if (events && judgementStyle) {
         for (const event of events) {
-          if (now - event.shown > JUDGEMENT_MS) continue
+          if (now - event.shown > judgementStyle.duration) continue
           if (event.x === undefined || event.y === undefined) {
             const obj = objectNear(map.objects, event.at)
             event.x = obj ? obj.x : 256
             event.y = obj ? obj.y : 192
           }
           const s = toScreen(event.x, event.y)
-          drawJudgement(ctx, event, 0, s.x, s.y, radius * 0.75, now)
+          drawJudgement(ctx, event, 0, s.x, s.y, radius * 0.75, now, judgementStyle, skin)
         }
       }
       let ax: number
@@ -632,7 +633,7 @@ export function Playfield({
 
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [map, mods, clockRef, leadMsRef, videoRef, skin, cursorRef, cursorStyleRef, blackoutRef, blackoutOpacityRef, autopilotRef, judgementsRef, judgementsOnRef])
+  }, [map, mods, clockRef, leadMsRef, videoRef, skin, cursorRef, cursorStyleRef, blackoutRef, blackoutOpacityRef, autopilotRef, judgementsRef, judgementStyleRef])
 
   return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 size-full" />
 }

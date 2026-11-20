@@ -15,7 +15,7 @@ import { type Role, type TapSlot, type VideoIssue, formatKey, laneSlot } from '@
 import { cn } from '@/lib/utils'
 import type { LaneSettings, ManiaBlackout } from '@/lib/lane-settings'
 import type { StandardSettings } from '@/lib/standard-settings'
-import type { ComboState, JudgementEvent } from '@/lib/judgements'
+import type { ComboState, JudgementEvent, JudgementStyle } from '@/lib/judgements'
 import { VideoIssueOverlay } from './video-issue'
 
 type Source = 'keyboard' | 'mouse'
@@ -70,7 +70,7 @@ export function GuestStage({
   standardSettings,
   showJudgements,
 }: {
-  showJudgements: boolean
+  showJudgements: JudgementStyle
   standardSettings: StandardSettings
   laneSettings: LaneSettings
   laneControls: LaneControls | null
@@ -104,8 +104,8 @@ export function GuestStage({
   blackoutOpacityRef.current = standardSettings.blackoutOpacity
   const autopilotRef = useRef(false)
   autopilotRef.current = role === 'tap' && standardSettings.autopilot && inputLive
-  const judgementsOnRef = useRef(showJudgements)
-  judgementsOnRef.current = showJudgements
+  const judgementStyleRef = useRef(showJudgements)
+  judgementStyleRef.current = showJudgements
   const laneSettingsRef = useRef(laneSettings)
   laneSettingsRef.current = laneSettings
   const maniaBlackoutRef = useRef<ManiaBlackout>('off')
@@ -318,7 +318,7 @@ export function GuestStage({
               settingsRef: laneSettingsRef,
               judgementsRef: playfield.judgementsRef,
               comboRef: playfield.comboRef,
-              judgementsOnRef,
+              judgementStyleRef,
             }}
           />
         )}
@@ -331,7 +331,7 @@ export function GuestStage({
             blackoutRef={blackoutRef}
             blackoutOpacityRef={blackoutOpacityRef}
             autopilotRef={autopilotRef}
-            judgementsOnRef={judgementsOnRef}
+            judgementStyleRef={judgementStyleRef}
           />
         )}
         {!playfield && videoIssue && videoIssue !== 'connecting' ? (

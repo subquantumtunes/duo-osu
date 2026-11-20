@@ -19,7 +19,22 @@ export type Skin = {
   mania: Map<number, ManiaLayout>
   /** Average colour of the skin's mania-note1, mania-note2 and mania-noteS images. */
   maniaNoteColors: ManiaNoteColors
+  /** The skin's hit100/hit50/hit0 sprites (and mania-/taiko- versions), keyed by file name. */
+  judgementSprites: Partial<Record<JudgementSpriteName, SkinSprite>>
 }
+
+export const JUDGEMENT_SPRITE_NAMES = [
+  'hit100',
+  'hit50',
+  'hit0',
+  'mania-hit100',
+  'mania-hit50',
+  'mania-hit0',
+  'taiko-hit100',
+  'taiko-hit0',
+] as const
+
+export type JudgementSpriteName = (typeof JUDGEMENT_SPRITE_NAMES)[number]
 
 export type ManiaNoteColors = { note1: string | null; note2: string | null; noteS: string | null }
 
@@ -183,6 +198,12 @@ export async function loadSkin(text: string): Promise<Skin | null> {
       (name) => decode(images[name]),
     ),
   )
+  const judgementSprites: Partial<Record<JudgementSpriteName, SkinSprite>> = {}
+  const decodedJudgements = await Promise.all(JUDGEMENT_SPRITE_NAMES.map((name) => decode(images[name])))
+  JUDGEMENT_SPRITE_NAMES.forEach((name, i) => {
+    const sprite = decodedJudgements[i]
+    if (sprite) judgementSprites[name] = sprite
+  })
   const iniText = typeof payload.ini === 'string' ? payload.ini : ''
   const ini = parseIni(iniText)
   const comboColors = Array.from({ length: 8 }, (_, i) => rgb(ini.get(`colours.combo${i + 1}`))).filter(
@@ -209,12 +230,13 @@ export async function loadSkin(text: string): Promise<Skin | null> {
     digitOverlap: Number.isFinite(overlap) ? overlap : -2,
     mania: parseManiaSections(iniText),
     maniaNoteColors: { note1: averageColor(note1), note2: averageColor(note2), noteS: averageColor(noteS) },
+    judgementSprites,
   }
 }
 
 export function closeSkin(skin: Skin | null) {
   if (!skin) return
-  for (const sprite of [skin.hitcircle, skin.overlay, skin.approach, skin.sliderBall, skin.reverseArrow, skin.followCircle, skin.cursor, ...(skin.digits ?? [])]) {
+  for (const sprite of [skin.hitcircle, skin.overlay, skin.approach, skin.sliderBall, skin.reverseArrow, skin.followCircle, skin.cursor, ...(skin.digits ?? []), ...Object.values(skin.judgementSprites)]) {
     sprite?.image.close()
   }
 }

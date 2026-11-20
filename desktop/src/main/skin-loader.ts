@@ -21,6 +21,18 @@ const SPRITES: [string, string][] = [
   ['mania-noteS', 'mania-noteS'],
   ]
 
+/** Judgement sprites; skins with animated judgements only ship the `-0` frame, so that's the fallback. */
+const JUDGEMENT_SPRITES = [
+  'hit100',
+  'hit50',
+  'hit0',
+  'mania-hit100',
+  'mania-hit50',
+  'mania-hit0',
+  'taiko-hit100',
+  'taiko-hit0',
+]
+
 /** Where skin files come from: the skin folder on disk, or tosu's /files/skin route. */
 interface SkinSource {
   /** Returns the file only if it exists; never errors on a missing file. */
@@ -149,6 +161,10 @@ export async function fetchSkin(
   const loaded = await Promise.all(entries.map(async ([key, file]) => [key, await image(source, file)] as const))
   const images: Record<string, SkinImage> = {}
   for (const [key, img] of loaded) if (img) images[key] = img
+  const judgements = await Promise.all(
+    JUDGEMENT_SPRITES.map(async (name) => [name, (await image(source, name)) ?? (await image(source, `${name}-0`))] as const),
+  )
+  for (const [key, img] of judgements) if (img) images[key] = img
   if (Object.keys(images).length === 0) return null
   return { id, ini, images }
 }
