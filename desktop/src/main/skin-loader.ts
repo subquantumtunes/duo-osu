@@ -132,7 +132,7 @@ export async function fetchSkin(
 ): Promise<OsuSkin | null> {
   const dir = await firstDir(skinDirs)
   if (!dir && !allowTosu) {
-    console.warn(`[osu-coop] Couldn't find the skin folder for "${id}" (tried ${skinDirs.filter(Boolean).join(', ') || 'nothing'}).`)
+    console.warn(`[duosu] Couldn't find the skin folder for "${id}" (tried ${skinDirs.filter(Boolean).join(', ') || 'nothing'}).`)
     return null
   }
   const source = dir ? diskSource(dir) : tosuSource(port)

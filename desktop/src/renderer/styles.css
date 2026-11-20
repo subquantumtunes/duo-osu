@@ -461,3 +461,13 @@ select {
     max-width: none;
   }
 }
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.button[hidden] {
+  display: none;
+}

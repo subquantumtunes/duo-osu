@@ -7,7 +7,7 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'osu! co-op — one aims, one taps',
+  title: 'duosu — one aims, one taps',
   description:
     'Stream your osu! game to a friend and split the controls: one player aims the cursor, the other taps the keys, on the same map in real time.',
   generator: 'v0.app',

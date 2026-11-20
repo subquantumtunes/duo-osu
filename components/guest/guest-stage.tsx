@@ -6,7 +6,7 @@ import type { Skin } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 import type { CursorSettings } from '@/lib/cursor-settings'
 import { Playfield } from './playfield'
-import { Maximize, Volume2 } from 'lucide-react'
+import { Eye, EyeOff, Maximize, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KeyLights } from '@/components/key-lights'
 import type { Role, TapSlot, VideoIssue } from '@/lib/protocol'
@@ -29,6 +29,8 @@ function videoContentRect(video: HTMLVideoElement) {
     height,
   }
 }
+
+const BLACKOUT_KEY = 'duosu:blackout'
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 
@@ -70,6 +72,20 @@ export function GuestStage({
   const cursorRef = useRef<{ x: number; y: number } | null>(null)
   const cursorStyleRef = useRef<CursorSettings>(cursorStyle)
   cursorStyleRef.current = cursorStyle
+  const [blackout, setBlackout] = useState(false)
+  const blackoutRef = useRef(false)
+  blackoutRef.current = blackout
+
+  useEffect(() => {
+    setBlackout(localStorage.getItem(BLACKOUT_KEY) === '1')
+  }, [])
+
+  const toggleBlackout = () => {
+    setBlackout((on) => {
+      localStorage.setItem(BLACKOUT_KEY, on ? '0' : '1')
+      return !on
+    })
+  }
 
   // Audio plays through its own element: the video element is re-attached whenever the video
   // call restarts, and keeping it muted means autoplay rules can never pause the picture.
@@ -229,6 +245,7 @@ export function GuestStage({
             videoRef={videoRef}
             cursorRef={role === 'aim' ? cursorRef : undefined}
             cursorStyleRef={cursorStyleRef}
+            blackoutRef={blackoutRef}
           />
         )}
         {!playfield && videoIssue && videoIssue !== 'connecting' ? (
@@ -263,6 +280,12 @@ export function GuestStage({
             >
               <Volume2 aria-hidden="true" />
               Unmute
+            </Button>
+          )}
+          {playfield && (
+            <Button variant="outline" aria-pressed={blackout} onClick={toggleBlackout}>
+              {blackout ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+              {blackout ? 'Show stream playfield' : 'Black out stream playfield'}
             </Button>
           )}
           <Button variant="outline" onClick={() => stageRef.current?.requestFullscreen()}>

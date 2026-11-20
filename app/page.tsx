@@ -34,7 +34,7 @@ export default function Page() {
             <div className="flex flex-col gap-1.5">
               <h2 className="text-xl font-semibold">Host a session</h2>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                You run osu! on your PC. Install dosu, start{' '}
+                You run osu! on your PC. Install duosu, start{' '}
                 <a
                   href="https://github.com/tosuapp/tosu/releases/latest"
                   target="_blank"
@@ -43,13 +43,13 @@ export default function Page() {
                 >
                   tosu
                 </a>
-                , and send the room code dosu gives you to your partner.
+                , and send the room code duosu gives you to your partner.
               </p>
             </div>
             <div className="mt-auto flex flex-col gap-2">
               <a href="/download" className={cn(buttonVariants({ size: 'lg' }), 'w-fit px-4')}>
                 <Download aria-hidden="true" />
-                Download dosu for Windows
+                Download duosu for Windows
               </a>
               <p className="text-xs text-muted-foreground">
                 {'Windows 10 or 11. If SmartScreen appears, click More info, then Run anyway. '}

@@ -5,6 +5,8 @@ import {
   type HostMessage,
   chunkText,
   ROOM_PREFIX,
+  PEER_TIMEOUT_MS,
+  type PartnerExit,
   type Role,
   type TapSlot,
   decodeInput,
@@ -128,6 +130,8 @@ export class HostSession {
   rtt: number | null = null
   partner: PartnerStats | null = null
   encoder: EncoderStats | null = null
+  /** Why the partner slot last emptied; cleared when someone joins. */
+  partnerExit: PartnerExit | null = null
 
   private gameAudio: ReturnType<typeof createGameAudioTrack> = null
   private sync: { live: boolean; mods: number; map: string | null } = { live: false, mods: 0, map: null }
@@ -153,6 +157,8 @@ export class HostSession {
   private inputConfirmed = false
   private statsTimer: ReturnType<typeof setInterval> | null = null
   private lastEncode = { frames: 0, seconds: 0 }
+  private lastPing = 0
+  private kicked = new Set<string>()
 
   constructor(
     private guestRole: Role,
@@ -182,7 +188,7 @@ export class HostSession {
         audio: false,
       })
     } catch (err) {
-      console.error('[osu-coop] screen capture failed:', err)
+      console.error('[duosu] screen capture failed:', err)
       this.error = describeShareError(err)
       this.setStatus('idle')
       return
@@ -241,7 +247,19 @@ export class HostSession {
     this.roomCode = null
     this.rtt = null
     this.partner = null
+    this.partnerExit = null
     this.setStatus('idle')
+  }
+
+  /** Removes the current partner but keeps the room open for someone else. */
+  kick() {
+    const ctrl = this.ctrl
+    const guest = this.guestId ?? ctrl?.peer
+    if (!guest) return
+    this.kicked.add(guest)
+    if (ctrl?.open) ctrl.send({ t: 'kicked' } satisfies HostMessage)
+    this.dropGuest('kicked')
+    setTimeout(() => ctrl?.close(), 300)
   }
 
   publishSync(next: { live: boolean; mods: number; map: string | null }) {
@@ -272,6 +290,13 @@ export class HostSession {
   }
 
   private accept(peer: Peer, conn: DataConnection) {
+    if (this.kicked.has(conn.peer)) {
+      conn.on('open', () => {
+        conn.send({ t: 'kicked' } satisfies HostMessage)
+        setTimeout(() => conn.close(), 500)
+      })
+      return
+    }
     if (this.guestId && this.guestId !== conn.peer && this.ctrl?.open) {
       conn.on('open', () => {
         conn.send({ t: 'full' } satisfies HostMessage)
@@ -305,6 +330,8 @@ export class HostSession {
       conn.send({ t: 'sync', ...this.sync } satisfies HostMessage)
       this.sendMap(conn)
       this.sendSkin(conn)
+      this.lastPing = performance.now()
+      this.partnerExit = null
       this.startStats()
       if (!this.stream) {
         this.videoNote = 'no screen capture'
@@ -321,13 +348,13 @@ export class HostSession {
       this.setStatus('connected')
     })
     conn.on('close', () => {
-      if (this.ctrl === conn) this.dropGuest()
+      if (this.ctrl === conn) this.dropGuest('left')
     })
     // PeerJS reports some recoverable problems as errors while the link keeps working, so only
     // drop the partner if the link actually went down.
     conn.on('error', (err) => {
-      console.warn('[osu-coop] ctrl link error:', err)
-      if (this.ctrl === conn && !conn.open) this.dropGuest()
+      console.warn('[duosu] ctrl link error:', err)
+      if (this.ctrl === conn && !conn.open) this.dropGuest('lost')
     })
   }
 
@@ -338,13 +365,13 @@ export class HostSession {
     const tracks = this.stream?.getVideoTracks().filter((t) => t.readyState === 'live') ?? []
     if (!peer || peer.destroyed) {
       this.videoNote = 'host peer closed'
-      console.warn('[osu-coop] video call skipped:', this.videoNote)
+      console.warn('[duosu] video call skipped:', this.videoNote)
       return
     }
     const partnerId = target ?? this.ctrl?.peer ?? this.guestId
     if (!partnerId) {
       this.videoNote = `no partner id (link ${this.ctrl ? (this.ctrl.open ? 'open' : 'not open') : 'missing'})`
-      console.warn('[osu-coop] video call skipped:', this.videoNote)
+      console.warn('[duosu] video call skipped:', this.videoNote)
       return
     }
     this.guestId = partnerId
@@ -363,14 +390,14 @@ export class HostSession {
         sdpTransform: (sdp: string) => (codec ? preferCodec(sdp, codec) : sdp),
       })
     } catch (err) {
-      console.error('[osu-coop] video call threw:', err)
+      console.error('[duosu] video call threw:', err)
       this.videoNote = `call threw: ${err instanceof Error ? err.message : String(err)}`
       this.scheduleVideoRecall()
       return
     }
     if (!call) {
       this.videoNote = peer.disconnected ? 'signaling server offline, retrying' : 'call could not start'
-      console.warn('[osu-coop] video call not created:', this.videoNote)
+      console.warn('[duosu] video call not created:', this.videoNote)
       this.scheduleVideoRecall()
       return
     }
@@ -380,7 +407,7 @@ export class HostSession {
     this.lastEncode = { frames: 0, seconds: 0 }
 
     call.on('error', (err) => {
-      console.error('[osu-coop] video call error:', err)
+      console.error('[duosu] video call error:', err)
       if (this.videoCall === call) this.videoNote = `${err.type}: ${err.message}`
     })
     call.on('iceStateChanged', (state) => {
@@ -394,7 +421,7 @@ export class HostSession {
       if (!this.videoNote || this.videoNote === 'negotiating') {
         this.videoNote = `closed, ICE ${this.videoIce ?? 'never started'}`
       }
-      console.warn('[osu-coop] video call closed:', this.videoNote)
+      console.warn('[duosu] video call closed:', this.videoNote)
       this.scheduleVideoRecall()
     })
 
@@ -458,7 +485,8 @@ export class HostSession {
     this.encoder = null
   }
 
-  private dropGuest() {
+  private dropGuest(exit: PartnerExit) {
+    this.partnerExit = exit
     this.handlers.onRelease()
     this.closeLink()
     this.rtt = null
@@ -494,11 +522,21 @@ export class HostSession {
   private handleMessage(raw: unknown, from: DataConnection) {
     const msg = raw as GuestMessage
     if (!msg || typeof msg !== 'object') return
+    if (this.kicked.has(from.peer)) return
+    if (msg.t === 'bye') {
+      if (this.ctrl === from || (!this.ctrl && from.label === 'ctrl')) {
+        if (this.ctrl) this.dropGuest('left')
+        from.close()
+      }
+      return
+    }
     // The partner is still talking on a link the host already let go of, so take it back.
     if (!this.ctrl && from.label === 'ctrl' && from.open) {
-      console.warn('[osu-coop] re-adopting live partner link')
+      console.warn('[duosu] re-adopting live partner link')
       this.ctrl = from
       this.guestId = from.peer
+      this.lastPing = performance.now()
+      this.partnerExit = null
       this.startStats()
       this.setStatus('connected')
     }
@@ -529,6 +567,7 @@ export class HostSession {
         break
       }
       case 'ping': {
+        this.lastPing = performance.now()
         const ctrl = this.ctrl
         ctrl?.send({ t: 'pong', ts: msg.ts } satisfies HostMessage)
         const live = this.stream?.getVideoTracks()[0]?.readyState === 'live'
@@ -580,8 +619,14 @@ export class HostSession {
   }
 
   private async readStats() {
+    // A closed tab or dropped network often never fires a close event, so watch the partner's pings.
+    if (this.ctrl && performance.now() - this.lastPing > PEER_TIMEOUT_MS) {
+      console.warn('[duosu] partner stopped responding')
+      this.dropGuest('lost')
+      return
+    }
     if (this.ctrl?.open && this.stream && !this.videoCall && !this.videoRecallTimer && this.videoRecalls < VIDEO_RECALL_LIMIT) {
-      console.warn('[osu-coop] partner connected without a video call, calling again')
+      console.warn('[duosu] partner connected without a video call, calling again')
       this.scheduleVideoRecall()
     }
     const pc = this.videoCall?.peerConnection

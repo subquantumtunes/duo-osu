@@ -231,7 +231,7 @@ export class OsuWatcher {
         this.events.skin(skin)
       } else {
         this.skinRetryAt = performance.now() + SKIN_RETRY_MS
-        console.warn(`[osu-coop] Couldn't load the skin "${id}" from tosu; the partner sees the built-in circles.`)
+        console.warn(`[duosu] Couldn't load the skin "${id}" from tosu; the partner sees the built-in circles.`)
       }
     } finally {
       this.skinLoading = false
@@ -274,7 +274,7 @@ export class OsuWatcher {
       this.mapRetryAt = performance.now() + UNVERIFIED_RETRY_MS
       if (!this.mapWarned) {
         this.mapWarned = true
-        console.warn(`[osu-coop] Waiting for the beatmap file matching ${checksum} (tried ${candidates.filter(Boolean).join(', ')}).`)
+        console.warn(`[duosu] Waiting for the beatmap file matching ${checksum} (tried ${candidates.filter(Boolean).join(', ')}).`)
       }
     } finally {
       if (this.checksum === checksum) this.mapLoading = false
@@ -322,7 +322,7 @@ export class OsuWatcher {
       const text = bytes && bytes.length > 0 && bytes.length <= MAX_MAP_BYTES ? bytes.toString('utf8') : null
       if (text && text.trimStart().startsWith('osu file format')) {
         if (md5(bytes!) !== checksum.toLowerCase()) {
-          console.warn(`[osu-coop] Using osu!'s copy of beatmap ${id}; it differs from your local file.`)
+          console.warn(`[duosu] Using osu!'s copy of beatmap ${id}; it differs from your local file.`)
         }
         this.downloaded.set(id, text)
         return text

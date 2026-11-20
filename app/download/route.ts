@@ -1,5 +1,6 @@
 const REPO = 'subquantumtunes/duo-osu'
-const ASSET_NAME = 'dosu-Setup.exe'
+const ASSET_NAME = 'duosu-Setup.exe'
+const LEGACY_ASSET_NAME = 'dosu-Setup.exe'
 
 type Release = { assets: { name: string; url: string }[] }
 
@@ -21,11 +22,13 @@ export async function GET() {
     cache: 'no-store',
   })
   if (!releaseRes.ok) {
-    return new Response('The dosu installer is not available yet. Try again in a few minutes.', { status: 503 })
+    return new Response('The duosu installer is not available yet. Try again in a few minutes.', { status: 503 })
   }
 
   const release = (await releaseRes.json()) as Release
-  const asset = release.assets.find((a) => a.name === ASSET_NAME)
+  // Releases built before the rename still ship the old installer name.
+  const asset =
+    release.assets.find((a) => a.name === ASSET_NAME) ?? release.assets.find((a) => a.name === LEGACY_ASSET_NAME)
   if (!asset) {
     return new Response('The latest release has no installer attached yet.', { status: 404 })
   }

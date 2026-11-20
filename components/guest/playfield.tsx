@@ -101,7 +101,8 @@ function mixColor([r, g, b]: [number, number, number], toward: number, amount: n
 /** Stable draws slider tracks see-through, with an opaque border ring. */
 const SLIDER_BODY_ALPHA = 0.7
 const SLIDER_BODY_WIDTH = 0.875
-const SLIDER_GRADIENT_STEPS = 8
+const SLIDER_GRADIENT_MIN_STEPS = 8
+const SLIDER_GRADIENT_MAX_STEPS = 64
 
 /**
  * Draws one slider into an offscreen layer before compositing, so the track's
@@ -142,9 +143,16 @@ function drawSliderBody(
   const base = parseColor(track)
   const bodyWidth = radius * 2 * SLIDER_BODY_WIDTH
 
+  // One band per device pixel of shrink on each side, so the steps blend into a smooth
+  // gradient like the game's instead of showing as nested outlines.
+  const m = ctx.getTransform()
+  const pixelScale = Math.hypot(m.a, m.b) || 1
+  const shrinkPx = (bodyWidth * pixelScale * 0.85) / 2
+  const steps = Math.min(SLIDER_GRADIENT_MAX_STEPS, Math.max(SLIDER_GRADIENT_MIN_STEPS, Math.ceil(shrinkPx)))
+
   reset()
-  for (let i = 0; i < SLIDER_GRADIENT_STEPS; i++) {
-    const t = i / (SLIDER_GRADIENT_STEPS - 1)
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1)
     lc.lineWidth = bodyWidth * (1 - t * 0.85)
     lc.strokeStyle = t < 0.5 ? mixColor(base, 0, 0.25 - t * 0.5) : mixColor(base, 255, (t - 0.5) * 0.6)
     lc.stroke()
@@ -240,7 +248,10 @@ export function Playfield({
   skin = null,
   cursorRef,
   cursorStyleRef,
+  blackoutRef,
 }: {
+  /** When true, the stream behind the playfield is painted black. Read every frame. */
+  blackoutRef?: RefObject<boolean>
   /** The partner's own aim, 0..1 across the video, drawn above the notes. */
   cursorRef?: RefObject<{ x: number; y: number } | null>
   /** Read every frame, so changing the look never restarts the drawing loop. */
@@ -281,16 +292,23 @@ export function Playfield({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
 
+      const content = contentRect(stage, videoRef.current)
+      const field = playfieldRect(content)
+      const radius = diff.radius * field.scale
+      if (blackoutRef?.current) {
+        // Covers the stream's own circles (plus the radius they can overhang the playfield) so a
+        // lagging picture can't be mistaken for the locally drawn notes. The HUD stays visible.
+        ctx.fillStyle = '#000'
+        ctx.fillRect(field.left - radius, field.top - radius, 512 * field.scale + radius * 2, 384 * field.scale + radius * 2)
+      }
+
       const clock = clockRef.current
       if (!clock?.ready) return
       const time = clock.at(performance.now()) + clock.rate * (leadMsRef.current ?? 0)
-      const content = contentRect(stage, videoRef.current)
-      const field = playfieldRect(content)
       const toScreen = (x: number, y: number) => ({
         x: field.left + x * field.scale,
         y: field.top + (diff.flipY ? 384 - y : y) * field.scale,
       })
-      const radius = diff.radius * field.scale
       const unit = radius / SD_RADIUS_PX
 
       const visible: HitObject[] = []

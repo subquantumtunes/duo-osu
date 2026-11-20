@@ -1,7 +1,7 @@
 {
   "name": "osu-coop-host",
   "version": "0.1.0",
-  "description": "Desktop host for osu! co-op: native screen capture and input injection",
+  "description": "Desktop host for duosu: native screen capture and input injection",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
@@ -26,15 +26,15 @@
   },
   "build": {
     "appId": "app.osucoop.host",
-    "productName": "dosu",
+    "productName": "duosu",
     "files": ["dist/**/*", "package.json"],
     "asarUnpack": ["node_modules/koffi/**", "node_modules/loopback-capture/**"],
     "extraResources": [{ "from": "vendor/tosu", "to": "tosu" }],
     "directories": { "output": "release" },
     "win": {
       "target": ["nsis"],
-      "executableName": "dosu",
-      "artifactName": "dosu-Setup.${ext}"
+      "executableName": "duosu",
+      "artifactName": "duosu-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -42,7 +42,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "dosu",
+      "shortcutName": "duosu",
       "runAfterFinish": true
     }
   }
