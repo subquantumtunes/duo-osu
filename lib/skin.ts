@@ -17,6 +17,43 @@ export type Skin = {
   digitOverlap: number
   /** The skin.ini `[Mania]` sections, keyed by their key count. */
   mania: Map<number, ManiaLayout>
+  /** Average colour of the skin's mania-note1, mania-note2 and mania-noteS images. */
+  maniaNoteColors: ManiaNoteColors
+}
+
+export type ManiaNoteColors = { note1: string | null; note2: string | null; noteS: string | null }
+
+/** The opacity-weighted average colour of a sprite. Closes the sprite, since only the colour is kept. */
+function averageColor(sprite: SkinSprite | null): string | null {
+  if (!sprite) return null
+  const { image } = sprite
+  try {
+    const w = Math.max(1, Math.min(image.width, 64))
+    const h = Math.max(1, Math.min(image.height, 64))
+    const canvas = new OffscreenCanvas(w, h)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(image, 0, 0, w, h)
+    const data = ctx.getImageData(0, 0, w, h).data
+    let r = 0
+    let g = 0
+    let b = 0
+    let weight = 0
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3]
+      if (a < 64) continue
+      r += data[i] * a
+      g += data[i + 1] * a
+      b += data[i + 2] * a
+      weight += a
+    }
+    if (weight === 0) return null
+    return `rgb(${Math.round(r / weight)}, ${Math.round(g / weight)}, ${Math.round(b / weight)})`
+  } catch {
+    return null
+  } finally {
+    image.close()
+  }
 }
 
 /** A mania stage as osu!stable lays it out, in its 480px-tall coordinate space. */
@@ -129,7 +166,7 @@ export async function loadSkin(text: string): Promise<Skin | null> {
     return null
   }
   const images = payload.images && typeof payload.images === 'object' ? payload.images : {}
-  const [hitcircle, overlay, approach, sliderBall, reverseArrow, followCircle, cursor, ...digits] = await Promise.all(
+  const [hitcircle, overlay, approach, sliderBall, reverseArrow, followCircle, cursor, note1, note2, noteS, ...digits] = await Promise.all(
     [
       'hitcircle',
       'hitcircleoverlay',
@@ -138,6 +175,9 @@ export async function loadSkin(text: string): Promise<Skin | null> {
       'reversearrow',
       'sliderfollowcircle',
       'cursor',
+      'mania-note1',
+      'mania-note2',
+      'mania-noteS',
       ...Array.from({ length: 10 }, (_, d) => `digit-${d}`),
     ].map(
       (name) => decode(images[name]),
@@ -168,6 +208,7 @@ export async function loadSkin(text: string): Promise<Skin | null> {
     overlayAboveNumber: above !== '0',
     digitOverlap: Number.isFinite(overlap) ? overlap : -2,
     mania: parseManiaSections(iniText),
+    maniaNoteColors: { note1: averageColor(note1), note2: averageColor(note2), noteS: averageColor(noteS) },
   }
 }
 

@@ -2,10 +2,12 @@
 
 import { useId } from 'react'
 import {
+  BLACKOUT_WIDEN_MAX,
   type LaneSettings,
   type ManiaBlackout,
   MANIA_SPEED_MAX,
   MANIA_SPEED_MIN,
+  noteHueColor,
 } from '@/lib/lane-settings'
 import { RULESET_MANIA } from '@/lib/lanes'
 import { cn } from '@/lib/utils'
@@ -16,6 +18,8 @@ const BLACKOUT_OPTIONS: { value: ManiaBlackout; label: string }[] = [
   { value: 'host', label: "Host's columns" },
   { value: 'all', label: 'Whole stage' },
 ]
+
+const HUE_GRADIENT = `linear-gradient(to right, ${[0, 60, 120, 180, 240, 300, 359].map(noteHueColor).join(', ')})`
 
 export function LaneSettingsPanel({
   ruleset,
@@ -32,6 +36,7 @@ export function LaneSettingsPanel({
   const max = mania ? MANIA_SPEED_MAX : 2
   const value = mania ? settings.maniaSpeed : settings.taikoSpeed
   const percent = ((value - min) / (max - min)) * 100
+  const widenPercent = (settings.blackoutWiden / BLACKOUT_WIDEN_MAX) * 100
 
   return (
     <section
@@ -101,6 +106,76 @@ export function LaneSettingsPanel({
           </fieldset>
         )}
       </div>
+
+      {mania && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs">
+              <label htmlFor={`${id}-widen`} className="text-muted-foreground">
+                Widen blackout
+              </label>
+              <span className="font-mono text-foreground">
+                {settings.blackoutWiden === 0 ? 'Off' : `+${settings.blackoutWiden}`}
+              </span>
+            </div>
+            <input
+              id={`${id}-widen`}
+              type="range"
+              min={0}
+              max={BLACKOUT_WIDEN_MAX}
+              step={1}
+              value={settings.blackoutWiden}
+              onChange={(e) => onChange({ blackoutWiden: Number(e.target.value) })}
+              className={`h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`}
+              style={{
+                background: `linear-gradient(to right, var(--primary) ${widenPercent}%, var(--muted) ${widenPercent}%)`,
+              }}
+            />
+            <p className="text-xs text-muted-foreground">Grows each blacked-out column (or the whole stage) on both sides.</p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs">
+              <label htmlFor={`${id}-hue`} className="text-muted-foreground">
+                Note colour
+              </label>
+              <span className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="size-3 rounded-full border border-border"
+                  style={{ background: settings.maniaNoteHue == null ? 'transparent' : noteHueColor(settings.maniaNoteHue) }}
+                />
+                <span className="font-mono text-foreground">
+                  {settings.maniaNoteHue == null ? 'Host skin' : `${settings.maniaNoteHue}°`}
+                </span>
+              </span>
+            </div>
+            <input
+              id={`${id}-hue`}
+              type="range"
+              min={0}
+              max={359}
+              step={1}
+              value={settings.maniaNoteHue ?? 0}
+              aria-valuetext={settings.maniaNoteHue == null ? 'Host skin colours' : `Hue ${settings.maniaNoteHue} degrees`}
+              onChange={(e) => onChange({ maniaNoteHue: Number(e.target.value) })}
+              className={cn(
+                `h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`,
+                settings.maniaNoteHue == null && 'opacity-60',
+              )}
+              style={{ background: HUE_GRADIENT }}
+            />
+            <button
+              type="button"
+              onClick={() => onChange({ maniaNoteHue: null })}
+              disabled={settings.maniaNoteHue == null}
+              className="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
+            >
+              Use host skin colours
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         <Toggle

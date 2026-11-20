@@ -4,7 +4,7 @@ import { type RefObject, useEffect, useRef } from 'react'
 import type { Beatmap, DrumNote, ManiaNote } from '@/lib/beatmap'
 import { MOD_HIDDEN, scrollPosition } from '@/lib/beatmap'
 import { RULESET_TAIKO } from '@/lib/lanes'
-import { type LaneSettings, type ManiaBlackout, maniaUnitsPerMs } from '@/lib/lane-settings'
+import { type LaneSettings, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
 import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 
@@ -290,18 +290,15 @@ function drawMania(
   const mode = view.blackoutRef.current ?? 'off'
   const hides = (k: number) => mode === 'all' || (mode === 'host' && !mine.has(k))
   const now = performance.now()
+  const widen = Math.max(0, settings?.blackoutWiden ?? 0) * unit
 
   if (mode === 'all') {
     ctx.fillStyle = '#000'
-    ctx.fillRect(stageLeft, c.top, total, c.height)
+    ctx.fillRect(stageLeft - widen, c.top, total + widen * 2, c.height)
   }
   for (let k = 0; k < keys; k++) {
     const own = mine.has(k)
-    if (!own && mode !== 'off') {
-      ctx.fillStyle = '#000'
-      ctx.fillRect(xs[k], c.top, ws[k], c.height)
-      continue
-    }
+    if (!own && mode !== 'off') continue
     ctx.fillStyle = hides(k) ? 'rgb(18, 12, 18)' : own ? 'rgba(24, 14, 22, 0.92)' : 'rgba(14, 10, 14, 0.55)'
     ctx.fillRect(xs[k], c.top, ws[k], c.height)
     if (pressed[k]) {
@@ -314,6 +311,23 @@ function drawMania(
     ctx.strokeStyle = 'rgba(255,255,255,0.1)'
     ctx.lineWidth = 1
     ctx.strokeRect(xs[k] + 0.5, c.top, ws[k] - 1, c.height)
+  }
+  // Host columns are blacked out after the partner's lanes so widening covers the gaps between
+  // them, but before the notes so the partner's notes are never hidden under it.
+  if (mode !== 'off') {
+    ctx.fillStyle = '#000'
+    for (let k = 0; k < keys; k++) {
+      if (!mine.has(k)) ctx.fillRect(xs[k] - widen, c.top, ws[k] + widen * 2, c.height)
+    }
+  }
+
+  const hue = settings?.maniaNoteHue
+  const skinColors = skin?.maniaNoteColors
+  const noteColor = (k: number) => {
+    if (hue != null) return noteHueColor(hue)
+    if (keys % 2 === 1 && k === (keys - 1) / 2) return skinColors?.noteS ?? '#fcb81e'
+    // osu! mirrors note1/note2 out from the stage edges, e.g. 1 2 2 1 in 4K.
+    return Math.min(k, keys - 1 - k) % 2 === 0 ? (skinColors?.note1 ?? '#f4f4f5') : (skinColors?.note2 ?? '#ff66aa')
   }
 
   const yFor = (t: number) => judgeY - (scrollPosition(scroll, t) - nowPos) * pxPerSongMs
@@ -359,8 +373,7 @@ function drawMania(
     if (alpha <= 0) continue
     const headY = yFor(headTime)
     if (hidden && headY > c.top + (judgeY - c.top) * 0.55 && !hold) continue
-    const color = keys % 2 === 1 && k === (keys - 1) / 2 ? '#fcb81e' : k % 2 === 0 ? '#f4f4f5' : '#ff66aa'
-    ctx.fillStyle = color
+    ctx.fillStyle = noteColor(k)
     if (hold) {
       const tailY = yFor(note.end)
       ctx.globalAlpha = alpha * 0.55

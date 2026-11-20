@@ -16,7 +16,10 @@ const SPRITES: [string, string][] = [
   ['reversearrow', 'reversearrow'],
   ['sliderfollowcircle', 'sliderfollowcircle'],
   ['cursor', 'cursor'],
-]
+  ['mania-note1', 'mania-note1'],
+  ['mania-note2', 'mania-note2'],
+  ['mania-noteS', 'mania-noteS'],
+  ]
 
 /** Where skin files come from: the skin folder on disk, or tosu's /files/skin route. */
 interface SkinSource {
