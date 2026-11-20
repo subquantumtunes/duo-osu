@@ -4,7 +4,7 @@ import { type RefObject, useEffect, useRef } from 'react'
 import type { Beatmap, DrumNote, ManiaNote } from '@/lib/beatmap'
 import { MOD_HIDDEN, scrollPosition } from '@/lib/beatmap'
 import { RULESET_TAIKO } from '@/lib/lanes'
-import { type LaneSettings, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
+import { type LaneSettings, laneColor, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
 import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 
@@ -267,19 +267,23 @@ function drawMania(
   const keys = map.keys
   const layout = maniaLayoutFor(skin, keys)
   const unit = c.height / 480
+  const settings = view.settingsRef.current
+  // Scaling the whole stage from its centre keeps every column edge, note, and blackout in step,
+  // so a stage that reads slightly narrow lines up at both outer edges, not just the middle.
+  const scale = (settings?.maniaStageScale ?? 100) / 100
+  const xUnit = unit * scale
   const xs: number[] = []
   const ws: number[] = []
   let total = 0
   for (let k = 0; k < keys; k++) {
     xs.push(total)
-    ws.push(layout.widths[k] * unit)
-    total += layout.widths[k] * unit + (k < keys - 1 ? layout.spacing[k] * unit : 0)
+    ws.push(layout.widths[k] * xUnit)
+    total += layout.widths[k] * xUnit + (k < keys - 1 ? layout.spacing[k] * xUnit : 0)
   }
-  // osu! centres the stage horizontally.
-  const stageLeft = c.left + (c.width - total) / 2
+  // osu! centres the stage horizontally; the offset lets the partner nudge it onto the stream.
+  const stageLeft = c.left + (c.width - total) / 2 + (settings?.maniaStageOffset ?? 0) * unit
   for (let k = 0; k < keys; k++) xs[k] += stageLeft
   const judgeY = c.top + layout.hitPosition * unit
-  const settings = view.settingsRef.current
   // osu! keeps the scroll speed in pixels per ms the same whatever the skin's hit position, and
   // the speed is per real millisecond, so DT and HT change how much song time is on screen.
   const pxPerSongMs = (maniaUnitsPerMs(settings?.maniaSpeed ?? 20) * unit) / rate
@@ -290,16 +294,23 @@ function drawMania(
   const mode = view.blackoutRef.current ?? 'off'
   const hides = (k: number) => mode === 'all' || (mode === 'host' && !mine.has(k))
   const now = performance.now()
-  const widen = Math.max(0, settings?.blackoutWiden ?? 0) * unit
+  const laneHue = settings?.laneHue ?? 320
+  const laneBrightness = settings?.laneBrightness ?? 8
+  const laneOpacity = settings?.laneOpacity ?? 92
+  // Whole-pixel edges, so the blackout never leaves an anti-aliased sliver of stream at a column edge.
+  const edgeL = (k: number) => Math.floor(xs[k])
+  const edgeW = (k: number) => Math.ceil(xs[k] + ws[k]) - Math.floor(xs[k])
 
   if (mode === 'all') {
     ctx.fillStyle = '#000'
-    ctx.fillRect(stageLeft - widen, c.top, total + widen * 2, c.height)
+    ctx.fillRect(Math.floor(stageLeft), c.top, Math.ceil(stageLeft + total) - Math.floor(stageLeft), c.height)
   }
   for (let k = 0; k < keys; k++) {
     const own = mine.has(k)
     if (!own && mode !== 'off') continue
-    ctx.fillStyle = hides(k) ? 'rgb(18, 12, 18)' : own ? 'rgba(24, 14, 22, 0.92)' : 'rgba(14, 10, 14, 0.55)'
+    ctx.fillStyle = hides(k)
+      ? laneColor(laneHue, laneBrightness)
+      : laneColor(laneHue, laneBrightness, own ? laneOpacity : laneOpacity * 0.6)
     ctx.fillRect(xs[k], c.top, ws[k], c.height)
     if (pressed[k]) {
       const glow = ctx.createLinearGradient(0, judgeY, 0, judgeY - c.height * 0.3)
@@ -312,12 +323,14 @@ function drawMania(
     ctx.lineWidth = 1
     ctx.strokeRect(xs[k] + 0.5, c.top, ws[k] - 1, c.height)
   }
-  // Host columns are blacked out after the partner's lanes so widening covers the gaps between
-  // them, but before the notes so the partner's notes are never hidden under it.
+  // Host columns are blacked out before the notes so the partner's notes are never hidden under it.
+  // Neighbouring host columns are joined so any column spacing between them is covered too.
   if (mode !== 'off') {
     ctx.fillStyle = '#000'
     for (let k = 0; k < keys; k++) {
-      if (!mine.has(k)) ctx.fillRect(xs[k] - widen, c.top, ws[k] + widen * 2, c.height)
+      if (mine.has(k)) continue
+      const right = k + 1 < keys && !mine.has(k + 1) ? Math.ceil(xs[k + 1]) : edgeL(k) + edgeW(k)
+      ctx.fillRect(edgeL(k), c.top, right - edgeL(k), c.height)
     }
   }
 

@@ -2,12 +2,15 @@
 
 import { useId } from 'react'
 import {
-  BLACKOUT_WIDEN_MAX,
   type LaneSettings,
+  laneColor,
   type ManiaBlackout,
   MANIA_SPEED_MAX,
   MANIA_SPEED_MIN,
   noteHueColor,
+  STAGE_OFFSET_MAX,
+  STAGE_SCALE_MAX,
+  STAGE_SCALE_MIN,
 } from '@/lib/lane-settings'
 import { RULESET_MANIA } from '@/lib/lanes'
 import { cn } from '@/lib/utils'
@@ -20,6 +23,50 @@ const BLACKOUT_OPTIONS: { value: ManiaBlackout; label: string }[] = [
 ]
 
 const HUE_GRADIENT = `linear-gradient(to right, ${[0, 60, 120, 180, 240, 300, 359].map(noteHueColor).join(', ')})`
+
+function RangeSetting({
+  id,
+  label,
+  display,
+  min,
+  max,
+  value,
+  onChange,
+  hint,
+}: {
+  id: string
+  label: string
+  display: string
+  min: number
+  max: number
+  value: number
+  onChange: (value: number) => void
+  hint?: string
+}) {
+  const percent = ((value - min) / (max - min)) * 100
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between text-xs">
+        <label htmlFor={id} className="text-muted-foreground">
+          {label}
+        </label>
+        <span className="font-mono text-foreground">{display}</span>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={`h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`}
+        style={{ background: `linear-gradient(to right, var(--primary) ${percent}%, var(--muted) ${percent}%)` }}
+      />
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  )
+}
 
 export function LaneSettingsPanel({
   ruleset,
@@ -36,7 +83,6 @@ export function LaneSettingsPanel({
   const max = mania ? MANIA_SPEED_MAX : 2
   const value = mania ? settings.maniaSpeed : settings.taikoSpeed
   const percent = ((value - min) / (max - min)) * 100
-  const widenPercent = (settings.blackoutWiden / BLACKOUT_WIDEN_MAX) * 100
 
   return (
     <section
@@ -109,30 +155,27 @@ export function LaneSettingsPanel({
 
       {mania && (
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs">
-              <label htmlFor={`${id}-widen`} className="text-muted-foreground">
-                Widen blackout
-              </label>
-              <span className="font-mono text-foreground">
-                {settings.blackoutWiden === 0 ? 'Off' : `+${settings.blackoutWiden}`}
-              </span>
-            </div>
-            <input
-              id={`${id}-widen`}
-              type="range"
-              min={0}
-              max={BLACKOUT_WIDEN_MAX}
-              step={1}
-              value={settings.blackoutWiden}
-              onChange={(e) => onChange({ blackoutWiden: Number(e.target.value) })}
-              className={`h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`}
-              style={{
-                background: `linear-gradient(to right, var(--primary) ${widenPercent}%, var(--muted) ${widenPercent}%)`,
-              }}
-            />
-            <p className="text-xs text-muted-foreground">Grows each blacked-out column (or the whole stage) on both sides.</p>
-          </div>
+          <RangeSetting
+            id={`${id}-scale`}
+            label="Lane width"
+            display={`${settings.maniaStageScale}%`}
+            min={STAGE_SCALE_MIN}
+            max={STAGE_SCALE_MAX}
+            value={settings.maniaStageScale}
+            onChange={(maniaStageScale) => onChange({ maniaStageScale })}
+            hint="Widens columns, notes, and blackout together, from the stage centre."
+          />
+
+          <RangeSetting
+            id={`${id}-offset`}
+            label="Stage position"
+            display={settings.maniaStageOffset === 0 ? 'Centre' : `${settings.maniaStageOffset > 0 ? '+' : ''}${settings.maniaStageOffset}`}
+            min={-STAGE_OFFSET_MAX}
+            max={STAGE_OFFSET_MAX}
+            value={settings.maniaStageOffset}
+            onChange={(maniaStageOffset) => onChange({ maniaStageOffset })}
+            hint="Nudge the stage left or right to line it up with the host's."
+          />
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs">
@@ -174,6 +217,52 @@ export function LaneSettingsPanel({
               Use host skin colours
             </button>
           </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs">
+              <label htmlFor={`${id}-lane-hue`} className="text-muted-foreground">
+                Lane colour
+              </label>
+              <span
+                aria-hidden="true"
+                className="h-3 w-6 rounded border border-border"
+                style={{ background: laneColor(settings.laneHue, settings.laneBrightness, settings.laneOpacity) }}
+              />
+            </div>
+            <input
+              id={`${id}-lane-hue`}
+              type="range"
+              min={0}
+              max={359}
+              step={1}
+              value={settings.laneHue}
+              aria-valuetext={`Hue ${settings.laneHue} degrees`}
+              onChange={(e) => onChange({ laneHue: Number(e.target.value) })}
+              className={`h-2 w-full cursor-pointer appearance-none rounded-full ${THUMB}`}
+              style={{ background: HUE_GRADIENT }}
+            />
+          </div>
+
+          <RangeSetting
+            id={`${id}-lane-brightness`}
+            label="Lane brightness"
+            display={settings.laneBrightness === 0 ? 'Black' : `${settings.laneBrightness}%`}
+            min={0}
+            max={100}
+            value={settings.laneBrightness}
+            onChange={(laneBrightness) => onChange({ laneBrightness })}
+          />
+
+          <RangeSetting
+            id={`${id}-lane-opacity`}
+            label="Lane opacity"
+            display={`${settings.laneOpacity}%`}
+            min={0}
+            max={100}
+            value={settings.laneOpacity}
+            onChange={(laneOpacity) => onChange({ laneOpacity })}
+            hint="Set brightness to 0 and opacity to 100% for solid black lanes."
+          />
         </div>
       )}
 
