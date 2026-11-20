@@ -16,10 +16,16 @@ export type LaneSettings = {
   maniaBlackout: ManiaBlackout
   /** Keep the stream visible at full brightness behind the mania stage. */
   streamBackground: boolean
-  /** Extra blackout on each side of a column or the stage, in osu!'s 480-tall playfield units. */
-  blackoutWiden: number
+  /** Width of the whole mania stage (columns, notes, and blackout) as a percentage of the skin's. */
+  maniaStageScale: number
+  /** Horizontal nudge of the mania stage, in osu!'s 480-tall playfield units. */
+  maniaStageOffset: number
   /** Hue for every mania note, or null to use the host skin's note colours. */
   maniaNoteHue: number | null
+  /** Colour of the partner's mania lanes: hue in degrees, brightness 0 (black) to 100, opacity 0 to 100. */
+  laneHue: number
+  laneBrightness: number
+  laneOpacity: number
 }
 
 export const DEFAULT_LANE_SETTINGS: LaneSettings = {
@@ -29,14 +35,25 @@ export const DEFAULT_LANE_SETTINGS: LaneSettings = {
   taikoConstant: false,
   maniaBlackout: 'off',
   streamBackground: false,
-  blackoutWiden: 0,
+  maniaStageScale: 100,
+  maniaStageOffset: 0,
   maniaNoteHue: null,
+  laneHue: 320,
+  laneBrightness: 8,
+  laneOpacity: 92,
 }
 
-export const BLACKOUT_WIDEN_MAX = 20
+export const STAGE_SCALE_MIN = 80
+export const STAGE_SCALE_MAX = 140
+export const STAGE_OFFSET_MAX = 40
 
 export function noteHueColor(hue: number) {
   return `hsl(${hue} 90% 65%)`
+}
+
+/** The lane colour; brightness 0 is pure black whatever the hue. */
+export function laneColor(hue: number, brightness: number, opacity = 100) {
+  return `hsl(${hue} 30% ${brightness / 2}% / ${opacity / 100})`
 }
 
 export const MANIA_SPEED_MIN = 1
