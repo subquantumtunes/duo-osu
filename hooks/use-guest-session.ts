@@ -110,7 +110,14 @@ export function useGuestSession(code: string) {
   const [role, setRole] = useState<Role | null>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [rtt, setRtt] = useState<number | null>(null)
-  const [sync, setSync] = useState<{ live: boolean; mods: number; map?: string | null } | null>(null)
+  const [sync, setSync] = useState<{
+    live: boolean
+    mods: number
+    map?: string | null
+    ruleset: number | null
+    keys: number | null
+    lanes: number[] | null
+  } | null>(null)
   const [map, setMap] = useState<Beatmap | null>(null)
   const [mapLoading, setMapLoading] = useState(false)
   const [skin, setSkin] = useState<Skin | null>(null)
@@ -305,7 +312,16 @@ export function useGuestSession(code: string) {
         } else if (msg.t === 'input-ok') {
           inputOk.current = true
         } else if (msg.t === 'sync') {
-          setSync({ live: msg.live, mods: msg.mods, map: msg.map })
+          const lanes =
+            Array.isArray(msg.lanes) && msg.lanes.every((l) => Number.isInteger(l) && l >= 0 && l < 10) ? msg.lanes : null
+          setSync({
+            live: msg.live,
+            mods: msg.mods,
+            map: msg.map,
+            ruleset: typeof msg.ruleset === 'number' ? msg.ruleset : null,
+            keys: typeof msg.keys === 'number' ? msg.keys : null,
+            lanes,
+          })
         } else if (msg.t === 'map') {
           receiveMapChunk(msg)
         } else if (msg.t === 'skin') {

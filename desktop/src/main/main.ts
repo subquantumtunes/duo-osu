@@ -3,6 +3,7 @@ import path from 'node:path'
 import {
   app,
   BrowserWindow,
+  clipboard,
   type DesktopCapturerSource,
   desktopCapturer,
   dialog,
@@ -14,11 +15,12 @@ import {
   session,
   shell,
 } from 'electron'
-import { IPC, type ScreenSource } from '../shared/api'
+import { IPC, isTapSlot, type ScreenSource } from '../shared/api'
 import { GameAudio } from './game-audio'
 import { createInjector } from './input'
 import { OsuWatcher } from './osu-watcher'
 import { TosuManager } from './tosu'
+import { createWindowTools, hwndFromSourceId } from './window-target'
 
 const TOSU_PORT = 24050
 
@@ -39,6 +41,28 @@ let sources: DesktopCapturerSource[] = []
 let selected: DesktopCapturerSource | null = null
 let tosu: TosuManager | null = null
 const injector = createInjector()
+const windows = createWindowTools()
+const OSU_EXE = 'osu!.exe'
+let trackTimer: NodeJS.Timeout | null = null
+
+function stopTracking() {
+  if (trackTimer) clearInterval(trackTimer)
+  trackTimer = null
+}
+
+/** Keeps the aim region on the osu! window as it moves or resizes, and reports when it closes. */
+function trackWindow(hwnd: number) {
+  stopTracking()
+  trackTimer = setInterval(() => {
+    if (!windows?.alive(hwnd)) {
+      stopTracking()
+      send(IPC.captureLost)
+      return
+    }
+    const bounds = windows.bounds(hwnd)
+    if (bounds) injector.setRegion(bounds)
+  }, 500)
+}
 
 const OSU_PLAYING = 2
 
@@ -98,26 +122,60 @@ function raisePriority(pid: number) {
 function registerIpc() {
   ipcMain.handle(IPC.listScreens, async (event): Promise<ScreenSource[]> => {
     if (!fromHostWindow(event)) return []
-    sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 320, height: 180 } })
+    const all = await desktopCapturer.getSources({
+      types: windows ? ['window', 'screen'] : ['screen'],
+      thumbnailSize: { width: 320, height: 180 },
+    })
+    // Only offer osu!'s own window, matched by its executable so browser tabs titled "osu!" don't show up.
+    const osuWindows = all.filter((s) => {
+      const hwnd = hwndFromSourceId(s.id)
+      return hwnd !== null && windows?.exeName(hwnd) === OSU_EXE
+    })
+    const screens = all.filter((s) => s.id.startsWith('screen:'))
+    sources = [...osuWindows, ...screens]
     const primary = screen.getPrimaryDisplay().id
-    return sources.map((source, index) => {
+    const windowList: ScreenSource[] = osuWindows.map((source) => {
+      const bounds = windows?.bounds(hwndFromSourceId(source.id) ?? 0)
+      return {
+        id: source.id,
+        kind: 'window',
+        name: osuWindows.length > 1 ? `osu! window (${source.name})` : 'osu! window',
+        width: bounds?.width ?? 0,
+        height: bounds?.height ?? 0,
+        primary: false,
+        thumbnail: source.thumbnail.toDataURL(),
+      }
+    })
+    const screenList: ScreenSource[] = screens.map((source, index) => {
       const display = displayFor(source)
       const bounds = physicalBounds(display)
       return {
         id: source.id,
-        name: sources.length > 1 ? `Screen ${index + 1}` : 'Your screen',
+        kind: 'screen',
+        name: screens.length > 1 ? `Screen ${index + 1}` : 'Your screen',
         width: bounds.width,
         height: bounds.height,
         primary: display.id === primary,
         thumbnail: source.thumbnail.toDataURL(),
       }
     })
+    return [...windowList, ...screenList]
   })
 
   ipcMain.handle(IPC.selectScreen, (event, id: unknown) => {
     if (!fromHostWindow(event) || typeof id !== 'string') return null
     const source = sources.find((s) => s.id === id)
     if (!source) return null
+    const hwnd = hwndFromSourceId(source.id)
+    if (hwnd !== null) {
+      const bounds = windows?.bounds(hwnd)
+      if (!bounds) return null
+      selected = source
+      injector.setRegion(bounds)
+      trackWindow(hwnd)
+      return { width: bounds.width, height: bounds.height }
+    }
+    stopTracking()
     selected = source
     const bounds = physicalBounds(displayFor(source))
     injector.setRegion(bounds)
@@ -137,6 +195,12 @@ function registerIpc() {
     return injector.setBindings(k1, k2)
   })
 
+  ipcMain.handle(IPC.setLaneBindings, (event, codes: unknown) => {
+    if (!fromHostWindow(event) || !Array.isArray(codes) || codes.length > 10) return false
+    if (!codes.every((code) => typeof code === 'string')) return false
+    return injector.setLaneBindings(codes)
+  })
+
   ipcMain.on(IPC.setClient, (event, client: unknown) => {
     if (!fromHostWindow(event) || (client !== 'stable' && client !== 'lazer')) return
     watcher.setClient(client)
@@ -149,7 +213,7 @@ function registerIpc() {
   })
 
   ipcMain.on(IPC.key, (event, slot: unknown, down: unknown) => {
-    if (!fromHostWindow(event) || (slot !== 'k1' && slot !== 'k2')) return
+    if (!fromHostWindow(event) || !isTapSlot(slot)) return
     if (down === true && !partnerInputAllowed()) return
     injector.key(slot, down === true)
   })
@@ -159,6 +223,13 @@ function registerIpc() {
   })
 
   ipcMain.handle(IPC.gameAudioStart, (event) => (fromHostWindow(event) ? gameAudio.start() : null))
+
+  // The renderer's permission handler denies clipboard access, so copy through the main process.
+  ipcMain.handle(IPC.copyText, (event, text: unknown) => {
+    if (!fromHostWindow(event) || typeof text !== 'string' || text.length > 256) return false
+    clipboard.writeText(text)
+    return true
+  })
 
   ipcMain.on(IPC.gameAudioStop, (event) => {
     if (fromHostWindow(event)) gameAudio.stop()
@@ -194,6 +265,7 @@ function createWindow() {
   win.webContents.on('render-process-gone', () => injector.releaseAll())
   win.on('closed', () => {
     win = null
+    stopTracking()
     injector.releaseAll()
     gameAudio.stop()
   })

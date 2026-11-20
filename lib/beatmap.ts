@@ -15,12 +15,26 @@ export type HitObject = {
   slideDuration?: number
 }
 
+/** `velocity` is how fast the note scrolls, in osu!px per ms, from the slider velocity at its time. */
+export type DrumNote = { kind: 'don' | 'kat' | 'roll' | 'swell'; big: boolean; time: number; end: number; velocity: number }
+
+export type ManiaNote = { column: number; time: number; end: number }
+
 export type Beatmap = {
   checksum: string
   title: string
+  /** The ruleset the .osu file was made for. */
+  mode: number
   cs: number
   ar: number
+  /** osu!standard objects; empty for taiko and mania maps. */
   objects: HitObject[]
+  /** Drum notes for taiko maps and for standard maps converted to taiko. */
+  drums: DrumNote[]
+  /** Mania notes; only native mania maps have them. */
+  notes: ManiaNote[]
+  /** Mania key count. */
+  keys: number
 }
 
 export const MOD_EASY = 2
@@ -226,12 +240,15 @@ export function parseBeatmap(text: string, checksum: string): Beatmap | null {
       rows.push(line)
     }
   }
-  if (mode !== 0) return null
+  if (mode !== 0 && mode !== 1 && mode !== 3) return null
 
   timing.sort((a, b) => a.time - b.time)
   const sliderMultiplier = difficulty.SliderMultiplier || 1.4
   const cs = difficulty.CircleSize ?? 5
   const ar = difficulty.ApproachRate ?? difficulty.OverallDifficulty ?? 5
+  const keys = Math.min(10, Math.max(1, Math.round(cs)))
+  const drums: DrumNote[] = []
+  const notes: ManiaNote[] = []
 
   let beatLength = timing.find((t) => t.uninherited)?.beatLength ?? 500
   let sv = 1
@@ -261,6 +278,29 @@ export function parseBeatmap(text: string, checksum: string): Beatmap | null {
     }
 
     const isSpinner = (type & 8) !== 0
+
+    if (mode === 3) {
+      const column = Math.min(keys - 1, Math.max(0, Math.floor((x * keys) / 512)))
+      const end = type & 128 ? Number((p[5] ?? '').split(':')[0]) : time
+      notes.push({ column, time, end: Number.isFinite(end) && end > time ? end : time })
+      continue
+    }
+
+    // Standard maps also get drums, so a standard map played in taiko can be drawn as osu! converts it.
+    const sound = Number(p[4]) || 0
+    const velocity = (sliderMultiplier * 100 * sv) / beatLength
+    if (isSpinner) {
+      drums.push({ kind: 'swell', big: false, time, end: Number(p[5]) || time, velocity })
+    } else if (type & 2) {
+      const slides = Math.max(1, Number(p[6]) || 1)
+      const length = Number(p[7]) || 0
+      const duration = (length / (sliderMultiplier * 100 * sv)) * beatLength * slides
+      drums.push({ kind: 'roll', big: (sound & 4) !== 0, time, end: time + duration, velocity })
+    } else {
+      drums.push({ kind: sound & 10 ? 'kat' : 'don', big: (sound & 4) !== 0, time, end: time, velocity })
+    }
+    if (mode === 1) continue
+
     if (!isSpinner) {
       if (objects.length === 0 || type & 4 || afterSpinner) {
         comboIndex += 1 + ((type >> 4) & 7)
@@ -300,5 +340,5 @@ export function parseBeatmap(text: string, checksum: string): Beatmap | null {
     }
   }
 
-  return { checksum, title: readTitle(text), cs, ar, objects }
+  return { checksum, title: readTitle(text), mode, cs, ar, objects, drums, notes, keys }
 }

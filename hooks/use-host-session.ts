@@ -12,6 +12,7 @@ import {
   PEER_TIMEOUT_MS,
   type PartnerExit,
   decodeInput,
+  isTapSlot,
   encodeClock,
   makeRoomCode,
   openInputChannel,
@@ -216,7 +217,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     if (!msg || typeof msg !== 'object') return
     switch (msg.t) {
       case 'key':
-        if ((msg.k !== 'k1' && msg.k !== 'k2') || typeof msg.n !== 'number') return
+        if (!isTapSlot(msg.k) || typeof msg.n !== 'number') return
         applyKey(msg.n, msg.k, Boolean(msg.down))
         break
       case 'aim':

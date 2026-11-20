@@ -10,6 +10,7 @@ import {
   type Role,
   type TapSlot,
   decodeInput,
+  isTapSlot,
   encodeAudioPacket,
   encodeClock,
   makeRoomCode,
@@ -17,6 +18,15 @@ import {
   openInputChannel,
 } from '@/lib/protocol'
 import type { PartnerStats } from '@/lib/timing'
+
+export type SyncState = {
+  live: boolean
+  mods: number
+  map: string | null
+  ruleset: number | null
+  keys: number | null
+  lanes: number[] | null
+}
 import { createGameAudioTrack } from './game-audio-track'
 
 export type HostStatus = 'idle' | 'starting' | 'waiting' | 'connected' | 'error'
@@ -134,7 +144,7 @@ export class HostSession {
   partnerExit: PartnerExit | null = null
 
   private gameAudio: ReturnType<typeof createGameAudioTrack> = null
-  private sync: { live: boolean; mods: number; map: string | null } = { live: false, mods: 0, map: null }
+  private sync: SyncState = { live: false, mods: 0, map: null, ruleset: null, keys: null, lanes: null }
   private map: { checksum: string; text: string } | null = null
   private skin: { id: string; text: string } | null = null
   private clockSeq = 0
@@ -262,8 +272,8 @@ export class HostSession {
     setTimeout(() => ctrl?.close(), 300)
   }
 
-  publishSync(next: { live: boolean; mods: number; map: string | null }) {
-    if (this.sync.live === next.live && this.sync.mods === next.mods && this.sync.map === next.map) return
+  publishSync(next: SyncState) {
+    if (JSON.stringify(this.sync) === JSON.stringify(next)) return
     this.sync = next
     if (this.ctrl?.open) this.ctrl.send({ t: 'sync', ...next } satisfies HostMessage)
   }
@@ -542,7 +552,7 @@ export class HostSession {
     }
     switch (msg.t) {
       case 'key':
-        if ((msg.k !== 'k1' && msg.k !== 'k2') || typeof msg.n !== 'number') return
+        if (!isTapSlot(msg.k) || typeof msg.n !== 'number') return
         this.applyKey(msg.n, msg.k, Boolean(msg.down))
         break
       case 'aim':

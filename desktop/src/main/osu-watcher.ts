@@ -41,6 +41,8 @@ export class OsuWatcher {
     offset: null,
     checksum: null,
     mapReady: false,
+    ruleset: null,
+    keys: null,
   }
   map: OsuMap | null = null
   skin: OsuSkin | null = null
@@ -149,7 +151,16 @@ export class OsuWatcher {
         const mods = state === PLAYING ? (data.play?.mods?.number ?? 0) : this.status.mods
         const offset = data.settings?.audio?.offset?.universal
         const detected = typeof data.client === 'string' && data.client.toLowerCase().includes('lazer') ? 'lazer' : 'stable'
-        this.set({ detected, state, mods, offset: typeof offset === 'number' ? offset : null })
+        // play.mode is what's being played; outside a play, the ruleset picked in song select.
+        const ruleset = numberOrNull(
+          (state === PLAYING ? data.play?.mode?.number : undefined) ??
+            data.settings?.mode?.number ??
+            data.beatmap?.mode?.number,
+        )
+        // In mania, the converted circle size is the key count, which also covers converted maps.
+        const cs = numberOrNull(data.beatmap?.stats?.cs?.converted ?? data.beatmap?.stats?.cs?.original)
+        const keys = ruleset === 3 && cs !== null ? Math.min(10, Math.max(1, Math.round(cs))) : null
+        this.set({ detected, state, mods, ruleset, keys, offset: typeof offset === 'number' ? offset : null })
         const songs = data.folders?.songs
         // Lazer reports the .osu file relative to its hashed file store (e.g. "3\38\<sha256>"),
         // with an empty songs folder, so it has to be joined to the store's location.
@@ -194,7 +205,10 @@ export class OsuWatcher {
         const menu = data.menu ?? {}
         const bm = menu.bm ?? {}
         const file = bm.path?.file
-        this.set({ state: menu.state ?? null, mods: menu.mods?.num ?? 0 })
+        const ruleset = numberOrNull(menu.gameMode)
+        const cs = numberOrNull(bm.stats?.memoryCS ?? bm.stats?.CS)
+        const keys = ruleset === 3 && cs !== null ? Math.min(10, Math.max(1, Math.round(cs))) : null
+        this.set({ state: menu.state ?? null, mods: menu.mods?.num ?? 0, ruleset, keys })
         void this.loadMap(bm.md5, bm.id, [joinIfStrings(data.settings?.folders?.songs, bm.path?.folder, file)])
         this.time(bm.time?.current)
       },
@@ -392,6 +406,10 @@ async function lazerFilesDir() {
     if (custom && path.isAbsolute(custom)) return path.join(custom, 'files')
   } catch {}
   return path.join(base, 'files')
+}
+
+function numberOrNull(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function joinIfStrings(...parts: unknown[]) {

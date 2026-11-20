@@ -7,6 +7,7 @@ export type Injector = {
   reason: string | null
   setRegion(region: Rectangle): void
   setBindings(k1: string, k2: string): boolean
+  setLaneBindings(codes: string[]): boolean
   aim(x: number, y: number): void
   key(slot: TapSlot, down: boolean): void
   releaseAll(): void
@@ -19,6 +20,7 @@ function unsupported(reason: string): Injector {
     reason,
     setRegion() {},
     setBindings: () => false,
+    setLaneBindings: () => false,
     aim() {},
     key() {},
     releaseAll() {},
@@ -89,7 +91,10 @@ function createWindowsInjector(): Injector {
   timeBeginPeriod(1)
 
   let region: Rectangle = { x: 0, y: 0, width: GetSystemMetrics(0), height: GetSystemMetrics(1) }
-  let bindings: Record<TapSlot, KeyStroke | null> = { k1: stroke('KeyZ'), k2: stroke('KeyX') }
+  let bindings: Record<'k1' | 'k2', KeyStroke | null> = { k1: stroke('KeyZ'), k2: stroke('KeyX') }
+  let lanes: KeyStroke[] = []
+  const strokeFor = (slot: TapSlot) =>
+    slot === 'k1' || slot === 'k2' ? bindings[slot] : (lanes[Number(slot.slice(1))] ?? null)
   const held = new Set<TapSlot>()
 
   function stroke(code: string): KeyStroke | null {
@@ -117,7 +122,7 @@ function createWindowsInjector(): Injector {
   }
 
   function key(slot: TapSlot, down: boolean) {
-    const binding = bindings[slot]
+    const binding = strokeFor(slot)
     if (!binding) return
     if (down && !held.has(slot)) {
       held.add(slot)
@@ -143,6 +148,13 @@ function createWindowsInjector(): Injector {
       if (!next.k1 || !next.k2) return false
       releaseAll()
       bindings = next
+      return true
+    },
+    setLaneBindings(codes) {
+      const next = codes.map(stroke)
+      if (next.some((s) => !s)) return false
+      releaseAll()
+      lanes = next as KeyStroke[]
       return true
     },
     // Absolute moves on the virtual desktop reach osu! with Raw input on, the way a tablet does.

@@ -15,10 +15,12 @@ const api: CoopApi = {
   inputStatus: () => ipcRenderer.invoke(IPC.inputStatus),
   osuSnapshot: () => ipcRenderer.invoke(IPC.osuSnapshot),
   setBindings: (k1, k2) => ipcRenderer.invoke(IPC.setBindings, k1, k2),
+  setLaneBindings: (codes) => ipcRenderer.invoke(IPC.setLaneBindings, codes),
   setClient: (client) => ipcRenderer.send(IPC.setClient, client),
   aim: (x, y) => ipcRenderer.send(IPC.aim, x, y),
   key: (slot, down) => ipcRenderer.send(IPC.key, slot, down),
   release: () => ipcRenderer.send(IPC.release),
+  onCaptureLost: (cb) => subscribe(IPC.captureLost, cb),
   onOsu: (cb) => subscribe(IPC.osu, cb),
   onTime: (cb) => subscribe(IPC.time, cb),
   onMap: (cb) => subscribe(IPC.map, cb),
@@ -27,6 +29,7 @@ const api: CoopApi = {
   stopGameAudio: () => ipcRenderer.send(IPC.gameAudioStop),
   onGameAudio: (cb) => subscribe(IPC.gameAudio, cb),
   onGameAudioStatus: (cb) => subscribe(IPC.gameAudioStatus, cb),
+  copyText: (text) => ipcRenderer.invoke(IPC.copyText, text),
 }
 
 contextBridge.exposeInMainWorld('coop', api)

@@ -1,5 +1,25 @@
 export type Role = 'aim' | 'tap'
-export type TapSlot = 'k1' | 'k2'
+/** `l0`..`l9` are taiko drums or mania columns, counted from the left. */
+export type LaneSlot = `l${number}`
+export type TapSlot = 'k1' | 'k2' | LaneSlot
+
+const LANE_LIMIT = 10
+
+export function laneSlot(lane: number): LaneSlot {
+  return `l${lane}`
+}
+
+/** The lane a slot drives, or null for the osu!standard K1/K2 slots. */
+export function laneOf(slot: TapSlot): number | null {
+  return slot === 'k1' || slot === 'k2' ? null : Number(slot.slice(1))
+}
+
+export function isTapSlot(value: unknown): value is TapSlot {
+  if (value === 'k1' || value === 'k2') return true
+  if (typeof value !== 'string') return false
+  const match = /^l(\d)$/.exec(value)
+  return match !== null && Number(match[1]) < LANE_LIMIT
+}
 
 export type GuestMessage =
   | { t: 'key'; k: TapSlot; down: boolean; n: number }
@@ -33,7 +53,19 @@ export type HostMessage =
   | { t: 'kicked' }
   | { t: 'input-ok' }
   /** `map` is the checksum of the map osu! is on; older hosts leave it out. */
-  | { t: 'sync'; live: boolean; mods: number; map?: string | null }
+  /**
+   * `ruleset` is the mode osu! is playing (0 standard, 1 taiko, 3 mania); `keys` is the mania key
+   * count and `lanes` the drums or columns the partner plays. Older hosts send none of them.
+   */
+  | {
+      t: 'sync'
+      live: boolean
+      mods: number
+      map?: string | null
+      ruleset?: number | null
+      keys?: number | null
+      lanes?: number[] | null
+    }
   | { t: 'map'; id: string; i: number; n: number; d: string }
   | { t: 'skin'; id: string; i: number; n: number; d: string }
 
@@ -174,7 +206,7 @@ export function encodeKey(seq: number, slot: TapSlot, down: boolean) {
   const view = new DataView(new ArrayBuffer(7))
   view.setUint8(0, PACKET_KEY)
   view.setUint32(1, seq)
-  view.setUint8(5, slot === 'k1' ? 1 : 2)
+  view.setUint8(5, slot === 'k1' ? 1 : slot === 'k2' ? 2 : 10 + (laneOf(slot) ?? 0))
   view.setUint8(6, down ? 1 : 0)
   return view.buffer
 }
@@ -224,8 +256,10 @@ export function decodeInput(data: unknown): InputPacket | null {
   }
   if (type === PACKET_KEY) {
     const slot = view.getUint8(5)
-    if (slot !== 1 && slot !== 2) return null
-    return { t: 'key', n: view.getUint32(1), k: slot === 1 ? 'k1' : 'k2', down: view.getUint8(6) === 1 }
+    const k: TapSlot | null =
+      slot === 1 ? 'k1' : slot === 2 ? 'k2' : slot >= 10 && slot < 10 + LANE_LIMIT ? laneSlot(slot - 10) : null
+    if (!k) return null
+    return { t: 'key', n: view.getUint32(1), k, down: view.getUint8(6) === 1 }
   }
   return null
 }

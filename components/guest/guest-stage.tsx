@@ -6,10 +6,12 @@ import type { Skin } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 import type { CursorSettings } from '@/lib/cursor-settings'
 import { Playfield } from './playfield'
+import { LanePlayfield } from './lane-playfield'
+import { RULESET_TAIKO, laneName } from '@/lib/lanes'
 import { Eye, EyeOff, Maximize, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KeyLights } from '@/components/key-lights'
-import type { Role, TapSlot, VideoIssue } from '@/lib/protocol'
+import { type Role, type TapSlot, type VideoIssue, formatKey, laneSlot } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
 import { VideoIssueOverlay } from './video-issue'
 
@@ -40,7 +42,12 @@ export type PlayfieldProps = {
   clockRef: RefObject<SyncClock>
   leadMsRef: RefObject<number>
   skin: Skin | null
+  /** Set for taiko and mania, which draw drums or columns instead of the standard playfield. */
+  laneRuleset?: number
 }
+
+/** The taiko drums or mania columns the partner plays, each with the key they press for it. */
+export type LaneControls = { ruleset: number; lanes: number[]; keys: string[] }
 
 export function GuestStage({
   stream,
@@ -53,7 +60,9 @@ export function GuestStage({
   onRetryVideo,
   cursorStyle,
   inputLive,
+  laneControls,
 }: {
+  laneControls: LaneControls | null
   inputLive: boolean
   cursorStyle: CursorSettings
   videoIssue: VideoIssue | null
@@ -69,8 +78,9 @@ export function GuestStage({
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [needsUnmute, setNeedsUnmute] = useState(false)
-  const [pressed, setPressed] = useState({ k1: false, k2: false })
-  const held = useRef<Record<TapSlot, Set<Source>>>({ k1: new Set(), k2: new Set() })
+  const [pressed, setPressed] = useState<Partial<Record<TapSlot, boolean>>>({})
+  const held = useRef(new Map<TapSlot, Set<Source>>())
+  const lanePressedRef = useRef<boolean[]>([])
   const cursorRef = useRef<{ x: number; y: number } | null>(null)
   const cursorStyleRef = useRef<CursorSettings>(cursorStyle)
   cursorStyleRef.current = cursorStyle
@@ -129,13 +139,16 @@ export function GuestStage({
 
   const press = useCallback(
     (slot: TapSlot, source: Source, down: boolean) => {
-      const set = held.current[slot]
+      let set = held.current.get(slot)
+      if (!set) held.current.set(slot, (set = new Set()))
       const wasDown = set.size > 0
       if (down) set.add(source)
       else set.delete(source)
       const isDown = set.size > 0
       if (wasDown !== isDown) {
         sendKey(slot, isDown)
+        const lane = /^l(\d)$/.exec(slot)
+        if (lane) lanePressedRef.current[Number(lane[1])] = isDown
         setPressed((p) => ({ ...p, [slot]: isDown }))
       }
     },
@@ -143,13 +156,14 @@ export function GuestStage({
   )
 
   const releaseAll = useCallback(() => {
-    for (const slot of ['k1', 'k2'] as const) {
-      if (held.current[slot].size > 0) {
-        held.current[slot].clear()
+    for (const [slot, set] of held.current) {
+      if (set.size > 0) {
+        set.clear()
         sendKey(slot, false)
       }
     }
-    setPressed({ k1: false, k2: false })
+    lanePressedRef.current = []
+    setPressed({})
   }, [sendKey])
 
   useEffect(() => {
@@ -179,10 +193,18 @@ export function GuestStage({
     }
   }, [role, sendAim])
 
+  const laneSignature = laneControls ? `${laneControls.ruleset}:${laneControls.lanes}:${laneControls.keys}` : ''
+
   useEffect(() => {
     if (role !== 'tap') return
+    const laneKeys = laneControls?.keys ?? null
+    const lanes = laneControls?.lanes ?? null
     const slotFor = (key: string): TapSlot | null => {
       const k = key === ' ' ? ' ' : key.toLowerCase()
+      if (laneKeys && lanes) {
+        const index = laneKeys.indexOf(k)
+        return index >= 0 ? laneSlot(lanes[index]) : null
+      }
       if (k === bindings.k1) return 'k1'
       if (k === bindings.k2) return 'k2'
       return null
@@ -208,9 +230,11 @@ export function GuestStage({
       window.removeEventListener('blur', releaseAll)
       releaseAll()
     }
-  }, [role, bindings.k1, bindings.k2, press, releaseAll])
+  }, [role, bindings.k1, bindings.k2, laneSignature, press, releaseAll])
 
-  const mouseSlot = (button: number): TapSlot | null => (button === 0 ? 'k1' : button === 2 ? 'k2' : null)
+  // Taiko and mania are keyboard only; clicks would land on an arbitrary lane.
+  const mouseSlot = (button: number): TapSlot | null =>
+    laneControls ? null : button === 0 ? 'k1' : button === 2 ? 'k2' : null
 
   return (
     <section className="flex flex-1 flex-col gap-3" aria-label="Host's game">
@@ -242,7 +266,16 @@ export function GuestStage({
           playsInline
           className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-10')}
         />
-        {playfield && (
+        {playfield?.laneRuleset !== undefined && laneControls && (
+          <LanePlayfield
+            map={playfield.map}
+            mods={playfield.mods}
+            clockRef={playfield.clockRef}
+            leadMsRef={playfield.leadMsRef}
+            view={{ ruleset: playfield.laneRuleset, lanes: laneControls.lanes, pressedRef: lanePressedRef }}
+          />
+        )}
+        {playfield && playfield.laneRuleset === undefined && (
           <Playfield
             {...playfield}
             videoRef={videoRef}
@@ -272,7 +305,11 @@ export function GuestStage({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         {role === 'tap' ? (
-          <KeyLights pressed={pressed} labels={bindings} />
+          laneControls ? (
+            <LaneLights controls={laneControls} pressed={pressed} />
+          ) : (
+            <KeyLights pressed={{ k1: Boolean(pressed.k1), k2: Boolean(pressed.k2) }} labels={bindings} />
+          )
         ) : (
           <p className="text-xs text-muted-foreground">
             Tip: go fullscreen and match your mouse sensitivity to feel natural.
@@ -306,5 +343,29 @@ export function GuestStage({
         </div>
       </div>
     </section>
+  )
+}
+
+function LaneLights({ controls, pressed }: { controls: LaneControls; pressed: Partial<Record<TapSlot, boolean>> }) {
+  return (
+    <div className="flex flex-wrap gap-2" aria-label="Your lanes">
+      {controls.lanes.map((lane, i) => {
+        const on = Boolean(pressed[laneSlot(lane)])
+        const name = controls.ruleset === RULESET_TAIKO ? laneName(RULESET_TAIKO, lane) : `Col ${lane + 1}`
+        return (
+          <div
+            key={lane}
+            className={cn(
+              'flex min-w-14 flex-col items-center rounded-lg border px-3 py-1.5 font-mono text-xs transition-colors duration-75',
+              on ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background/70 text-muted-foreground',
+            )}
+          >
+            <span className="font-semibold">{name}</span>
+            <span className="text-[10px] opacity-80">{formatKey(controls.keys[i] ?? '')}</span>
+            <span className="sr-only">{on ? 'pressed' : 'released'}</span>
+          </div>
+        )
+      })}
+    </div>
   )
 }
