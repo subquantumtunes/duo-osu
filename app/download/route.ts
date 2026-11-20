@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 const REPO = 'subquantumtunes/duo-osu'
 const ASSET_NAME = 'duosu-Setup.exe'
 const LEGACY_ASSET_NAME = 'dosu-Setup.exe'
@@ -17,7 +19,7 @@ export async function GET() {
   if (!token) {
     const releaseRes = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-      next: { revalidate: 300 },
+      cache: 'no-store',
     }).catch(() => null)
     const asset = releaseRes?.ok ? pickInstaller((await releaseRes.json()) as Release) : undefined
     const url = asset?.browser_download_url ?? `https://github.com/${REPO}/releases/latest/download/${ASSET_NAME}`
