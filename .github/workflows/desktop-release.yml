@@ -42,6 +42,9 @@ jobs:
           Remove-Item tosu.zip
           if (-not (Get-ChildItem vendor/tosu -Recurse -Filter 'tosu*.exe')) { throw 'tosu.exe missing from the tosu download' }
 
+      # A distinct version per build lets Windows and the installer tell builds apart.
+      - run: npm version 0.1.${{ github.run_number }} --no-git-tag-version --allow-same-version
+
       - run: npm run dist
 
       - uses: softprops/action-gh-release@v2
