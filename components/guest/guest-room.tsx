@@ -93,6 +93,7 @@ export function GuestRoom({ code }: { code: string }) {
               videoIssue={session.videoIssue}
               onRetryVideo={session.retryVideo}
               cursorStyle={cursorStyle}
+              inputLive={Boolean(session.sync?.live)}
               playfield={
                 usePlayfield && session.map
                   ? {

@@ -40,16 +40,36 @@ let selected: DesktopCapturerSource | null = null
 let tosu: TosuManager | null = null
 const injector = createInjector()
 
+const OSU_PLAYING = 2
+
+/** Sends to the host window, skipping it once closing has destroyed its webContents. */
+function send(channel: string, ...args: unknown[]) {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  win.webContents.send(channel, ...args)
+}
+
+/** The partner only drives input while a map is being played, never in menus or song select. */
+function partnerInputAllowed() {
+  return watcher.status.source !== null && watcher.status.state === OSU_PLAYING
+}
+
+let wasPlaying = false
+
 const watcher = new OsuWatcher(TOSU_PORT, {
-  status: (status) => win?.webContents.send(IPC.osu, status),
-  time: (ms) => win?.webContents.send(IPC.time, ms),
-  map: (map) => win?.webContents.send(IPC.map, map),
-  skin: (skin) => win?.webContents.send(IPC.skin, skin),
+  status: (status) => {
+    const playing = status.source !== null && status.state === OSU_PLAYING
+    if (wasPlaying && !playing) injector.releaseAll()
+    wasPlaying = playing
+    send(IPC.osu, status)
+  },
+  time: (ms) => send(IPC.time, ms),
+  map: (map) => send(IPC.map, map),
+  skin: (skin) => send(IPC.skin, skin),
 })
 
 const gameAudio = new GameAudio(
-  (chunk) => win?.webContents.send(IPC.gameAudio, chunk),
-  (status) => win?.webContents.send(IPC.gameAudioStatus, status),
+  (chunk) => send(IPC.gameAudio, chunk),
+  (status) => send(IPC.gameAudioStatus, status),
 )
 
 function fromHostWindow(event: IpcMainEvent | IpcMainInvokeEvent) {
@@ -124,12 +144,13 @@ function registerIpc() {
 
   ipcMain.on(IPC.aim, (event, x: unknown, y: unknown) => {
     if (!fromHostWindow(event) || typeof x !== 'number' || typeof y !== 'number') return
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !partnerInputAllowed()) return
     injector.aim(Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)))
   })
 
   ipcMain.on(IPC.key, (event, slot: unknown, down: unknown) => {
     if (!fromHostWindow(event) || (slot !== 'k1' && slot !== 'k2')) return
+    if (down === true && !partnerInputAllowed()) return
     injector.key(slot, down === true)
   })
 
@@ -172,9 +193,9 @@ function createWindow() {
   })
   win.webContents.on('render-process-gone', () => injector.releaseAll())
   win.on('closed', () => {
+    win = null
     injector.releaseAll()
     gameAudio.stop()
-    win = null
   })
 
   void win.loadFile(path.join(__dirname, 'index.html'))

@@ -52,7 +52,9 @@ export function GuestStage({
   videoIssue,
   onRetryVideo,
   cursorStyle,
+  inputLive,
 }: {
+  inputLive: boolean
   cursorStyle: CursorSettings
   videoIssue: VideoIssue | null
   onRetryVideo: () => void
@@ -74,7 +76,8 @@ export function GuestStage({
   cursorStyleRef.current = cursorStyle
   const [blackout, setBlackout] = useState(false)
   const blackoutRef = useRef(false)
-  blackoutRef.current = blackout
+  // The setting is remembered, but only applied while a map is live so song select stays visible.
+  blackoutRef.current = blackout && inputLive
 
   useEffect(() => {
     setBlackout(localStorage.getItem(BLACKOUT_KEY) === '1')
@@ -257,6 +260,14 @@ export function GuestStage({
               Connecting to the host’s video…
             </p>
           )
+        )}
+        {!inputLive && (
+          <p
+            role="status"
+            className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full border border-border bg-background/85 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur"
+          >
+            Waiting for map, your inputs aren&apos;t being sent yet
+          </p>
         )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
