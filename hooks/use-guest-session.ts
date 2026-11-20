@@ -24,6 +24,7 @@ import { type Beatmap, parseBeatmap } from '@/lib/beatmap'
 import { type Skin, closeSkin, loadSkin } from '@/lib/skin'
 import { SyncClock } from '@/lib/sync-clock'
 import { type PartnerMode, SOURCE_LAG_MS } from '@/lib/timing'
+import { isJudgement, type JudgementEvent, pushJudgement } from '@/lib/judgements'
 
 // One frame of capture plus encode on the host before a frame is even sent.
 const CAPTURE_ENCODE_MS = 17
@@ -137,6 +138,7 @@ export function useGuestSession(code: string) {
   const hostVideoRef = useRef<{ frames: number; live: boolean } | null>(null)
 
   const clockRef = useRef(new SyncClock())
+  const judgementsRef = useRef<JudgementEvent[]>([])
   const transitRef = useRef(0)
   const modeRef = useRef<PartnerMode>('video')
   const videoLatencyRef = useRef<number | null>(null)
@@ -322,6 +324,8 @@ export function useGuestSession(code: string) {
             keys: typeof msg.keys === 'number' ? msg.keys : null,
             lanes,
           })
+        } else if (msg.t === 'judge') {
+          if (isJudgement(msg.j) && Number.isFinite(msg.at)) pushJudgement(judgementsRef.current, msg.j, msg.at)
         } else if (msg.t === 'map') {
           receiveMapChunk(msg)
         } else if (msg.t === 'skin') {
@@ -545,6 +549,7 @@ export function useGuestSession(code: string) {
     videoIssue,
     retryVideo,
     clockRef,
+    judgementsRef,
     transitRef,
     setMode,
     join,

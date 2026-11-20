@@ -26,7 +26,11 @@ type Events = {
   time(ms: number): void
   map(map: OsuMap): void
   skin(skin: OsuSkin): void
+  /** A 100, 50 or miss (0) osu! just counted, at song time `at`. */
+  judge(j: 100 | 50 | 0, at: number): void
 }
+
+const MAX_JUDGES_PER_UPDATE = 4
 
 type Json = Record<string, any>
 
@@ -60,6 +64,8 @@ export class OsuWatcher {
   private mapWarned = false
   private precise = false
   private lastTimeSent = 0
+  private songTime = 0
+  private hits: { h100: number; h50: number; miss: number } | null = null
   private stopped = false
   private sockets = new Set<WebSocket>()
 
@@ -175,6 +181,7 @@ export class OsuWatcher {
           joinIfStrings(songs, data.folders?.beatmap),
         ])
         if (!this.precise) this.time(data.beatmap?.time?.live)
+        this.trackHits(state, data.play?.hits)
         if (this.status.client === 'stable') {
           const skinName = data.folders?.skin
           const game = data.folders?.game
@@ -223,8 +230,32 @@ export class OsuWatcher {
     this.events.status(next)
   }
 
+  /**
+   * tosu only reports running totals, so a judgement is a total going up between updates. A total
+   * going down means a retry, which just starts a new baseline.
+   */
+  private trackHits(state: number | null, hits: Json | undefined) {
+    if (state !== PLAYING || !hits) {
+      this.hits = null
+      return
+    }
+    const next = { h100: countOf(hits['100']), h50: countOf(hits['50']), miss: countOf(hits['0']) }
+    const prev = this.hits
+    this.hits = next
+    if (!prev || next.h100 < prev.h100 || next.h50 < prev.h50 || next.miss < prev.miss) return
+    const at = this.songTime
+    let budget = MAX_JUDGES_PER_UPDATE
+    const emit = (j: 100 | 50 | 0, n: number) => {
+      for (let i = 0; i < n && budget > 0; i++, budget--) this.events.judge(j, at)
+    }
+    emit(0, next.miss - prev.miss)
+    emit(50, next.h50 - prev.h50)
+    emit(100, next.h100 - prev.h100)
+  }
+
   private time(value: unknown) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return
+    this.songTime = value
     const now = performance.now()
     if (now - this.lastTimeSent < MIN_TIME_INTERVAL_MS) return
     this.lastTimeSent = now
@@ -406,6 +437,10 @@ async function lazerFilesDir() {
     if (custom && path.isAbsolute(custom)) return path.join(custom, 'files')
   } catch {}
   return path.join(base, 'files')
+}
+
+function countOf(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 }
 
 function numberOrNull(value: unknown) {

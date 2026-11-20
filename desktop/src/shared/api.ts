@@ -63,6 +63,8 @@ export type CoopApi = {
   onTime(cb: (ms: number) => void): () => void
   onMap(cb: (map: OsuMap) => void): () => void
   onSkin(cb: (skin: OsuSkin) => void): () => void
+  /** A 100, 50 or miss (0) osu! just counted. */
+  onJudge(cb: (judge: { j: 100 | 50 | 0; at: number }) => void): () => void
   startGameAudio(): Promise<GameAudioStatus>
   stopGameAudio(): void
   onGameAudio(cb: (chunk: Uint8Array) => void): () => void
@@ -86,6 +88,7 @@ export const IPC = {
   time: 'coop:time',
   map: 'coop:map',
   skin: 'coop:skin',
+  judge: 'coop:judge',
   gameAudioStart: 'coop:game-audio-start',
   gameAudioStop: 'coop:game-audio-stop',
   gameAudio: 'coop:game-audio',
