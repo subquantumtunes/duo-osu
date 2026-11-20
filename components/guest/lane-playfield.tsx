@@ -2,8 +2,9 @@
 
 import { type RefObject, useEffect, useRef } from 'react'
 import type { Beatmap, DrumNote, ManiaNote } from '@/lib/beatmap'
-import { MOD_HIDDEN } from '@/lib/beatmap'
+import { MOD_HIDDEN, scrollPosition } from '@/lib/beatmap'
 import { RULESET_TAIKO } from '@/lib/lanes'
+import { type LaneSettings, type ManiaBlackout, maniaUnitsPerMs } from '@/lib/lane-settings'
 import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 
@@ -12,8 +13,6 @@ const KAT = '#4fa9eb'
 const ROLL = '#fcb81e'
 const SWELL = '#f59a3c'
 const HIT_GLOW = '255,214,102'
-/** How long a mania note is on screen before its hit time, in real milliseconds. */
-const MANIA_SCROLL_MS = 650
 /** Presses this close to a note (in song milliseconds) count as hitting it. */
 const MANIA_WINDOW_MS = 150
 const TAIKO_WINDOW_MS = 120
@@ -34,8 +33,10 @@ export type LaneView = {
   pressedRef: RefObject<boolean[]>
   /** Presses waiting to be judged, drained every frame. */
   inputsRef: RefObject<LaneInput[]>
-  /** Paint the host's mania columns black over the stream. */
-  blackoutRef: RefObject<boolean>
+  /** What to paint black over the stream in mania; already `off` outside a live map. */
+  blackoutRef: RefObject<ManiaBlackout>
+  /** The partner's own scroll speeds, independent of the host's. */
+  settingsRef: RefObject<LaneSettings>
 }
 
 type Rect = { left: number; top: number; width: number; height: number }
@@ -129,12 +130,17 @@ function judgeMania(notes: ManiaNote[], judge: Judge, input: LaneInput, at: numb
 function drawTaiko(
   ctx: CanvasRenderingContext2D,
   c: Rect,
-  drums: DrumNote[],
+  map: Beatmap,
   judge: Judge,
   time: number,
   view: LaneView,
   hidden: boolean,
 ) {
+  const drums = map.drums
+  const settings = view.settingsRef.current
+  const speedScale = settings?.taikoSpeed ?? 1
+  const constant = Boolean(settings?.taikoConstant)
+  const velocityOf = (note: DrumNote) => (constant ? map.baseVelocity : note.velocity)
   // osu!stable's taiko layout: the playfield starts 135/480 down the screen, the hit circle sits
   // 160/480 of the height from the left, and notes scroll at 0.1px/ms per 100 slider velocity.
   const unit = c.height / 480
@@ -144,7 +150,7 @@ function drawTaiko(
   const cy = top + trackH / 2
   const hitX = c.left + 160 * unit
   const r = trackH * 0.2375
-  const pxPerMs = TAIKO_VELOCITY_MULTIPLIER * unit
+  const pxPerMs = TAIKO_VELOCITY_MULTIPLIER * unit * speedScale
   const now = performance.now()
   const mine = new Set(view.lanes)
   const playsKat = mine.has(0) || mine.has(3)
@@ -186,14 +192,16 @@ function drawTaiko(
   const visible: number[] = []
   for (let i = start; i < drums.length; i++) {
     const note = drums[i]
-    if (hitX + (note.time - time) * note.velocity * pxPerMs > c.left + c.width + r * 2) break
+    // Notes are sorted by time, not position, so a slow note can't end the scan early.
+    if (note.time - time > 30000) break
+    if (hitX + (note.time - time) * velocityOf(note) * pxPerMs > c.left + c.width + r * 2) continue
     visible.push(i)
   }
   // Back to front, so earlier notes sit on top as in osu!.
   for (let v = visible.length - 1; v >= 0; v--) {
     const i = visible[v]
     const note = drums[i]
-    const speed = note.velocity * pxPerMs
+    const speed = velocityOf(note) * pxPerMs
     const x = hitX + (note.time - time) * speed
     const nr = note.big ? r * 1.5 : r
     if (hidden && x < hitX + c.width * 0.35 && x > hitX) continue
@@ -271,20 +279,30 @@ function drawMania(
   const stageLeft = c.left + (c.width - total) / 2
   for (let k = 0; k < keys; k++) xs[k] += stageLeft
   const judgeY = c.top + layout.hitPosition * unit
-  const span = MANIA_SCROLL_MS * rate
+  const settings = view.settingsRef.current
+  // osu! keeps the scroll speed in pixels per ms the same whatever the skin's hit position, and
+  // the speed is per real millisecond, so DT and HT change how much song time is on screen.
+  const pxPerSongMs = (maniaUnitsPerMs(settings?.maniaSpeed ?? 20) * unit) / rate
+  const scroll = settings?.maniaConstant ? [] : map.scroll
+  const nowPos = scrollPosition(scroll, time)
   const pressed = view.pressedRef.current ?? []
   const mine = new Set(view.lanes)
-  const blackout = view.blackoutRef.current
+  const mode = view.blackoutRef.current ?? 'off'
+  const hides = (k: number) => mode === 'all' || (mode === 'host' && !mine.has(k))
   const now = performance.now()
 
+  if (mode === 'all') {
+    ctx.fillStyle = '#000'
+    ctx.fillRect(stageLeft, c.top, total, c.height)
+  }
   for (let k = 0; k < keys; k++) {
     const own = mine.has(k)
-    if (!own && blackout) {
+    if (!own && mode !== 'off') {
       ctx.fillStyle = '#000'
       ctx.fillRect(xs[k], c.top, ws[k], c.height)
       continue
     }
-    ctx.fillStyle = own ? 'rgba(24, 14, 22, 0.92)' : 'rgba(14, 10, 14, 0.75)'
+    ctx.fillStyle = hides(k) ? 'rgb(18, 12, 18)' : own ? 'rgba(24, 14, 22, 0.92)' : 'rgba(14, 10, 14, 0.55)'
     ctx.fillRect(xs[k], c.top, ws[k], c.height)
     if (pressed[k]) {
       const glow = ctx.createLinearGradient(0, judgeY, 0, judgeY - c.height * 0.3)
@@ -298,16 +316,17 @@ function drawMania(
     ctx.strokeRect(xs[k] + 0.5, c.top, ws[k] - 1, c.height)
   }
 
-  const yFor = (t: number) => judgeY - ((t - time) / span) * (judgeY - c.top)
+  const yFor = (t: number) => judgeY - (scrollPosition(scroll, t) - nowPos) * pxPerSongMs
   const noteH = Math.max(6, 12 * unit)
   const start = firstVisible(map.notes, time - MANIA_WINDOW_MS - MISS_FADE_MS)
   for (let i = start; i < map.notes.length; i++) {
     const note = map.notes[i]
-    if (note.time > time + span * 1.05) break
+    // Scroll position only grows with time, so the first note above the stage ends the scan.
+    if (note.time > time && yFor(note.time) < c.top - noteH) break
     const k = note.column
     if (k >= keys) continue
     const own = mine.has(k)
-    if (!own && blackout) continue
+    if (!own && mode !== 'off') continue
     const hold = note.end > note.time
     let state = judge.state[i]
     if (state === HIT) continue
@@ -357,7 +376,7 @@ function drawMania(
   // Judgement line, then hit bursts above it so they read over the notes.
   ctx.fillStyle = 'rgba(255,255,255,0.75)'
   for (let k = 0; k < keys; k++) {
-    if (!mine.has(k) && blackout) continue
+    if (!mine.has(k) && mode !== 'off') continue
     ctx.fillRect(xs[k], judgeY - 1, ws[k], 3)
   }
   for (let k = 0; k < keys; k++) {
@@ -440,7 +459,7 @@ export function LanePlayfield({
       ctx.beginPath()
       ctx.rect(content.left, content.top, content.width, content.height)
       ctx.clip()
-      if (taiko()) drawTaiko(ctx, content, map.drums, judge, time, current, hidden)
+      if (taiko()) drawTaiko(ctx, content, map, judge, time, current, hidden)
       else drawMania(ctx, content, map, skinRef.current, judge, time, clock.rate || 1, current, hidden)
       ctx.restore()
     }

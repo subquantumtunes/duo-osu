@@ -13,6 +13,8 @@ import { GuestStage, type LaneControls } from './guest-stage'
 import { useLaneKeys } from './use-lane-keys'
 import { RULESET_MANIA, RULESET_TAIKO, isLaneRuleset, laneName } from '@/lib/lanes'
 import { CursorSettingsPanel } from './cursor-settings'
+import { LaneSettingsPanel } from './lane-settings'
+import { useLaneSettings } from '@/lib/lane-settings'
 
 export function GuestRoom({ code }: { code: string }) {
   const session = useGuestSession(code)
@@ -22,6 +24,7 @@ export function GuestRoom({ code }: { code: string }) {
   const [preferVideo, setPreferVideo] = useState(false)
   const leadMsRef = useRef(0)
   const [cursorStyle, updateCursorStyle] = useCursorSettings()
+  const [laneSettings, updateLaneSettings] = useLaneSettings()
   // Older hosts don't say which map is live, so only check it when they do.
   const mapIsCurrent = session.sync?.map === undefined || session.sync.map === session.map?.checksum
   const ruleset = session.sync?.ruleset ?? null
@@ -125,6 +128,7 @@ export function GuestRoom({ code }: { code: string }) {
               cursorStyle={cursorStyle}
               inputLive={Boolean(session.sync?.live)}
               laneControls={session.role === 'tap' ? laneControls : null}
+              laneSettings={laneSettings}
               playfield={
                 usePlayfield && session.map
                   ? {
@@ -147,6 +151,9 @@ export function GuestRoom({ code }: { code: string }) {
               videoLatency={session.videoLatency}
               audio={session.audio}
             />
+            {session.role === 'tap' && laneMode !== null && (
+              <LaneSettingsPanel ruleset={laneMode} settings={laneSettings} onChange={updateLaneSettings} />
+            )}
             {session.role === 'aim' && (
               <CursorSettingsPanel
                 settings={cursorStyle}

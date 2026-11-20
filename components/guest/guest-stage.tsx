@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { KeyLights } from '@/components/key-lights'
 import { type Role, type TapSlot, type VideoIssue, formatKey, laneSlot } from '@/lib/protocol'
 import { cn } from '@/lib/utils'
+import type { LaneSettings, ManiaBlackout } from '@/lib/lane-settings'
 import { VideoIssueOverlay } from './video-issue'
 
 type Source = 'keyboard' | 'mouse'
@@ -61,7 +62,9 @@ export function GuestStage({
   cursorStyle,
   inputLive,
   laneControls,
+  laneSettings,
 }: {
+  laneSettings: LaneSettings
   laneControls: LaneControls | null
   inputLive: boolean
   cursorStyle: CursorSettings
@@ -89,6 +92,12 @@ export function GuestStage({
   const blackoutRef = useRef(false)
   // The setting is remembered, but only applied while a map is live so song select stays visible.
   blackoutRef.current = blackout && inputLive
+  const laneSettingsRef = useRef(laneSettings)
+  laneSettingsRef.current = laneSettings
+  const maniaBlackoutRef = useRef<ManiaBlackout>('off')
+  // Same rule as the standard blackout: only while a map is live.
+  maniaBlackoutRef.current = inputLive ? laneSettings.maniaBlackout : 'off'
+  const maniaStage = playfield?.laneRuleset === RULESET_MANIA
 
   useEffect(() => {
     setBlackout(localStorage.getItem(BLACKOUT_KEY) === '1')
@@ -273,7 +282,10 @@ export function GuestStage({
           autoPlay
           muted
           playsInline
-          className={cn('absolute inset-0 size-full object-contain transition-opacity', playfield && 'opacity-10')}
+          className={cn(
+            'absolute inset-0 size-full object-contain transition-opacity',
+            playfield && !(maniaStage && laneSettings.streamBackground) && 'opacity-10',
+          )}
         />
         {playfield?.laneRuleset !== undefined && laneControls && (
           <LanePlayfield
@@ -288,7 +300,8 @@ export function GuestStage({
               lanes: laneControls.lanes,
               pressedRef: lanePressedRef,
               inputsRef: laneInputsRef,
-              blackoutRef,
+              blackoutRef: maniaBlackoutRef,
+              settingsRef: laneSettingsRef,
             }}
           />
         )}
@@ -347,16 +360,10 @@ export function GuestStage({
               Unmute
             </Button>
           )}
-          {playfield && playfield.laneRuleset !== RULESET_TAIKO && (
+          {playfield && playfield.laneRuleset === undefined && (
             <Button variant="outline" aria-pressed={blackout} onClick={toggleBlackout}>
               {blackout ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
-              {playfield.laneRuleset === RULESET_MANIA
-                ? blackout
-                  ? "Show host's columns"
-                  : "Black out host's columns"
-                : blackout
-                  ? 'Show stream playfield'
-                  : 'Black out stream playfield'}
+              {blackout ? 'Show stream playfield' : 'Black out stream playfield'}
             </Button>
           )}
           <Button variant="outline" onClick={() => stageRef.current?.requestFullscreen()}>
