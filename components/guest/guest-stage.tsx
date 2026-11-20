@@ -52,7 +52,9 @@ export function GuestStage({
   videoIssue,
   onRetryVideo,
   cursorStyle,
+  inputLive,
 }: {
+  inputLive: boolean
   cursorStyle: CursorSettings
   videoIssue: VideoIssue | null
   onRetryVideo: () => void
@@ -257,6 +259,14 @@ export function GuestStage({
               Connecting to the host’s video…
             </p>
           )
+        )}
+        {!inputLive && (
+          <p
+            role="status"
+            className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full border border-border bg-background/85 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur"
+          >
+            Waiting for map, your inputs aren&apos;t being sent yet
+          </p>
         )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
