@@ -2,25 +2,65 @@
 
 import { type RefObject, useEffect, useRef } from 'react'
 import type { Beatmap, DrumNote, ManiaNote } from '@/lib/beatmap'
-import { MOD_HIDDEN } from '@/lib/beatmap'
+import { MOD_HIDDEN, scrollPosition } from '@/lib/beatmap'
 import { RULESET_TAIKO } from '@/lib/lanes'
+import { type LaneSettings, type ManiaBlackout, maniaUnitsPerMs } from '@/lib/lane-settings'
+import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
 
 const DON = '#eb4f4f'
 const KAT = '#4fa9eb'
 const ROLL = '#fcb81e'
 const SWELL = '#f59a3c'
-/** How long a mania note is on screen before its hit time, in real milliseconds. */
-const MANIA_SCROLL_MS = 650
-/** Taiko notes sit about this many real milliseconds ahead of the hit circle per track width. */
-const TAIKO_BASE_VELOCITY = 1.4
+const HIT_GLOW = '255,214,102'
+/** Presses this close to a note (in song milliseconds) count as hitting it. */
+const MANIA_WINDOW_MS = 150
+const TAIKO_WINDOW_MS = 120
+/** How long a missed note keeps fading after its window closes. */
+const MISS_FADE_MS = 220
+const FLASH_MS = 160
+/** osu! taiko multiplies slider velocity by 1.4 for scrolling. */
+const TAIKO_VELOCITY_MULTIPLIER = 1.4
+
+/** A partner key press or release on a lane, stamped with `performance.now()`. */
+export type LaneInput = { lane: number; down: boolean; at: number }
 
 export type LaneView = {
   ruleset: number
-  /** Lanes the partner plays; the rest are drawn dimmed. */
+  /** Lanes the partner plays; the rest belong to the host. */
   lanes: number[]
   /** Pressed state per lane. */
   pressedRef: RefObject<boolean[]>
+  /** Presses waiting to be judged, drained every frame. */
+  inputsRef: RefObject<LaneInput[]>
+  /** What to paint black over the stream in mania; already `off` outside a live map. */
+  blackoutRef: RefObject<ManiaBlackout>
+  /** The partner's own scroll speeds, independent of the host's. */
+  settingsRef: RefObject<LaneSettings>
+}
+
+type Rect = { left: number; top: number; width: number; height: number }
+
+const PENDING = 0
+const HIT = 1
+const HOLDING = 2
+const MISSED = 3
+
+type Judge = {
+  state: Uint8Array
+  /** Song time a note was missed or a hold was let go, for fading it out. */
+  missedAt: Float64Array
+  holding: Map<number, number>
+  flashAt: number[]
+}
+
+function contentRect(stage: HTMLElement, video: HTMLVideoElement | null): Rect {
+  const width = stage.clientWidth
+  const height = stage.clientHeight
+  const vw = video?.videoWidth || 16
+  const vh = video?.videoHeight || 9
+  const scale = Math.min(width / vw, height / vh)
+  return { left: (width - vw * scale) / 2, top: (height - vh * scale) / 2, width: vw * scale, height: vh * scale }
 }
 
 function firstVisible<T extends { time: number; end: number }>(list: T[], from: number) {
@@ -34,83 +74,174 @@ function firstVisible<T extends { time: number; end: number }>(list: T[], from: 
   return lo
 }
 
+function newJudge(count: number): Judge {
+  return { state: new Uint8Array(count), missedAt: new Float64Array(count), holding: new Map(), flashAt: [] }
+}
+
+function isKat(lane: number) {
+  return lane === 0 || lane === 3
+}
+
+function judgeTaiko(drums: DrumNote[], judge: Judge, input: LaneInput, at: number) {
+  if (!input.down) return
+  const kind = isKat(input.lane) ? 'kat' : 'don'
+  for (let i = firstVisible(drums, at - TAIKO_WINDOW_MS); i < drums.length; i++) {
+    const note = drums[i]
+    if (note.time > at + TAIKO_WINDOW_MS) break
+    if (note.kind !== kind || judge.state[i] !== PENDING) continue
+    if (Math.abs(note.time - at) > TAIKO_WINDOW_MS) continue
+    judge.state[i] = HIT
+    judge.flashAt[input.lane] = performance.now()
+    return
+  }
+}
+
+function judgeMania(notes: ManiaNote[], judge: Judge, input: LaneInput, at: number) {
+  const { lane } = input
+  if (!input.down) {
+    const index = judge.holding.get(lane)
+    if (index === undefined) return
+    judge.holding.delete(lane)
+    if (at >= notes[index].end - MANIA_WINDOW_MS) {
+      judge.state[index] = HIT
+      judge.flashAt[lane] = performance.now()
+    } else {
+      judge.state[index] = MISSED
+      judge.missedAt[index] = at
+    }
+    return
+  }
+  for (let i = firstVisible(notes, at - MANIA_WINDOW_MS); i < notes.length; i++) {
+    const note = notes[i]
+    if (note.time > at + MANIA_WINDOW_MS) break
+    if (note.column !== lane || judge.state[i] !== PENDING) continue
+    if (Math.abs(note.time - at) > MANIA_WINDOW_MS) continue
+    judge.flashAt[lane] = performance.now()
+    if (note.end > note.time) {
+      judge.state[i] = HOLDING
+      judge.holding.set(lane, i)
+    } else {
+      judge.state[i] = HIT
+    }
+    return
+  }
+}
+
 function drawTaiko(
   ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  drums: DrumNote[],
+  c: Rect,
+  map: Beatmap,
+  judge: Judge,
   time: number,
-  rate: number,
   view: LaneView,
   hidden: boolean,
 ) {
-  const trackH = Math.min(h * 0.32, 180)
-  const top = (h - trackH) / 2
-  const hitX = Math.max(trackH * 0.9, w * 0.14)
-  const r = trackH * 0.28
-  const scale = (w / 1024) * TAIKO_BASE_VELOCITY
+  const drums = map.drums
+  const settings = view.settingsRef.current
+  const speedScale = settings?.taikoSpeed ?? 1
+  const constant = Boolean(settings?.taikoConstant)
+  const velocityOf = (note: DrumNote) => (constant ? map.baseVelocity : note.velocity)
+  // osu!stable's taiko layout: the playfield starts 135/480 down the screen, the hit circle sits
+  // 160/480 of the height from the left, and notes scroll at 0.1px/ms per 100 slider velocity.
+  const unit = c.height / 480
+  const aspect = c.width / c.height
+  const trackH = Math.min((200 / 768) * c.height * Math.max(1, aspect / (16 / 9)), c.height / 3)
+  const top = c.top + 135 * unit
+  const cy = top + trackH / 2
+  const hitX = c.left + 160 * unit
+  const r = trackH * 0.2375
+  const pxPerMs = TAIKO_VELOCITY_MULTIPLIER * unit * speedScale
+  const now = performance.now()
+  const mine = new Set(view.lanes)
+  const playsKat = mine.has(0) || mine.has(3)
+  const playsDon = mine.has(1) || mine.has(2)
+
   ctx.fillStyle = 'rgba(14, 10, 14, 0.92)'
-  ctx.fillRect(0, top, w, trackH)
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+  ctx.fillRect(c.left, top, c.width, trackH)
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)'
   ctx.lineWidth = 2
   ctx.beginPath()
-  ctx.arc(hitX, top + trackH / 2, r * 1.05, 0, Math.PI * 2)
+  ctx.arc(hitX, cy, r * 1.05, 0, Math.PI * 2)
   ctx.stroke()
 
   const pressed = view.pressedRef.current ?? []
-  const playsKat = view.lanes.includes(0) || view.lanes.includes(3)
-  const playsDon = view.lanes.includes(1) || view.lanes.includes(2)
-  // Drum halves light up so the partner sees which of their keys is down.
   for (let lane = 0; lane < 4; lane++) {
-    if (!pressed[lane]) continue
-    const kat = lane === 0 || lane === 3
-    ctx.fillStyle = kat ? 'rgba(79,169,235,0.55)' : 'rgba(235,79,79,0.55)'
-    ctx.beginPath()
+    const kat = isKat(lane)
     const left = lane < 2
-    ctx.arc(hitX, top + trackH / 2, kat ? r * 1.05 : r * 0.8, left ? Math.PI / 2 : -Math.PI / 2, left ? Math.PI * 1.5 : Math.PI / 2)
-    ctx.fill()
+    const start = left ? Math.PI / 2 : -Math.PI / 2
+    const end = left ? Math.PI * 1.5 : Math.PI / 2
+    if (pressed[lane]) {
+      ctx.fillStyle = kat ? 'rgba(79,169,235,0.45)' : 'rgba(235,79,79,0.45)'
+      ctx.beginPath()
+      if (!kat) ctx.moveTo(hitX, cy)
+      ctx.arc(hitX, cy, kat ? r * 1.05 : r * 0.8, start, end)
+      ctx.fill()
+    }
+    const flash = 1 - (now - (judge.flashAt[lane] ?? -Infinity)) / FLASH_MS
+    if (flash > 0) {
+      ctx.globalAlpha = flash
+      ctx.fillStyle = `rgba(${HIT_GLOW},0.55)`
+      ctx.beginPath()
+      ctx.arc(hitX, cy, r * (1.1 + (1 - flash) * 0.5), 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = 1
+    }
   }
 
-  const fromTime = time - 200
-  const start = firstVisible(drums, fromTime)
-  const cy = top + trackH / 2
-  // Draw back to front so earlier notes sit on top, as in osu!.
-  const visible: DrumNote[] = []
+  const start = firstVisible(drums, time - TAIKO_WINDOW_MS - MISS_FADE_MS)
+  const visible: number[] = []
   for (let i = start; i < drums.length; i++) {
     const note = drums[i]
-    const x = hitX + (note.time - time) * note.velocity * scale
-    if (x > w + r * 2) break
-    visible.push(note)
+    // Notes are sorted by time, not position, so a slow note can't end the scan early.
+    if (note.time - time > 30000) break
+    if (hitX + (note.time - time) * velocityOf(note) * pxPerMs > c.left + c.width + r * 2) continue
+    visible.push(i)
   }
-  for (let i = visible.length - 1; i >= 0; i--) {
-    const note = visible[i]
-    const speed = note.velocity * scale
+  // Back to front, so earlier notes sit on top as in osu!.
+  for (let v = visible.length - 1; v >= 0; v--) {
+    const i = visible[v]
+    const note = drums[i]
+    const speed = velocityOf(note) * pxPerMs
     const x = hitX + (note.time - time) * speed
-    const nr = note.big ? r * 1.4 : r
-    if (hidden && x < hitX + w * 0.35) continue
+    const nr = note.big ? r * 1.5 : r
+    if (hidden && x < hitX + c.width * 0.35 && x > hitX) continue
     if (note.kind === 'roll' || note.kind === 'swell') {
-      const endX = note.kind === 'swell' ? x : hitX + (note.end - time) * speed
-      if (endX < hitX - nr && note.kind === 'roll') continue
+      if (time > note.end) continue
       if (note.kind === 'roll') {
+        const endX = hitX + (note.end - time) * speed
+        const from = Math.max(x, hitX)
         ctx.fillStyle = ROLL
         ctx.globalAlpha = 0.85
         ctx.beginPath()
-        ctx.roundRect(Math.max(x, hitX) - nr * 0.8, cy - nr * 0.8, Math.max(0, endX - Math.max(x, hitX)) + nr * 1.6, nr * 1.6, nr * 0.8)
+        ctx.roundRect(from - nr * 0.8, cy - nr * 0.8, Math.max(0, endX - from) + nr * 1.6, nr * 1.6, nr * 0.8)
         ctx.fill()
       } else {
-        const sx = time >= note.time && time <= note.end ? hitX : x
         ctx.fillStyle = SWELL
         ctx.beginPath()
-        ctx.arc(sx, cy, r * 1.2, 0, Math.PI * 2)
+        ctx.arc(time >= note.time ? hitX : x, cy, r * 1.2, 0, Math.PI * 2)
         ctx.fill()
       }
       ctx.globalAlpha = 1
       continue
     }
-    if (time > note.time + 100) continue
     const kat = note.kind === 'kat'
-    const mine = kat ? playsKat : playsDon
-    ctx.globalAlpha = mine ? 1 : 0.28
+    const partners = kat ? playsKat : playsDon
+    const state = judge.state[i]
+    if (state === HIT) continue
+    let alpha = 1
+    if (partners) {
+      if (state === PENDING && time > note.time + TAIKO_WINDOW_MS) {
+        judge.state[i] = MISSED
+        judge.missedAt[i] = time
+      }
+      if (judge.state[i] === MISSED) alpha = Math.max(0, 1 - (time - judge.missedAt[i]) / MISS_FADE_MS) * 0.6
+    } else {
+      // The host's notes: we can't see their judgements, so they leave as they reach the circle.
+      if (time >= note.time) continue
+      alpha = 0.35
+    }
+    if (alpha <= 0) continue
+    ctx.globalAlpha = alpha
     ctx.fillStyle = kat ? KAT : DON
     ctx.beginPath()
     ctx.arc(x, cy, nr, 0, Math.PI * 2)
@@ -124,109 +255,182 @@ function drawTaiko(
 
 function drawMania(
   ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  notes: ManiaNote[],
-  keys: number,
+  c: Rect,
+  map: Beatmap,
+  skin: Skin | null,
+  judge: Judge,
   time: number,
   rate: number,
   view: LaneView,
   hidden: boolean,
 ) {
-  const colW = Math.min(72, (w * 0.7) / keys)
-  const left = (w - colW * keys) / 2
-  const judgeY = h - Math.max(64, h * 0.12)
-  const span = MANIA_SCROLL_MS * rate
+  const keys = map.keys
+  const layout = maniaLayoutFor(skin, keys)
+  const unit = c.height / 480
+  const xs: number[] = []
+  const ws: number[] = []
+  let total = 0
+  for (let k = 0; k < keys; k++) {
+    xs.push(total)
+    ws.push(layout.widths[k] * unit)
+    total += layout.widths[k] * unit + (k < keys - 1 ? layout.spacing[k] * unit : 0)
+  }
+  // osu! centres the stage horizontally.
+  const stageLeft = c.left + (c.width - total) / 2
+  for (let k = 0; k < keys; k++) xs[k] += stageLeft
+  const judgeY = c.top + layout.hitPosition * unit
+  const settings = view.settingsRef.current
+  // osu! keeps the scroll speed in pixels per ms the same whatever the skin's hit position, and
+  // the speed is per real millisecond, so DT and HT change how much song time is on screen.
+  const pxPerSongMs = (maniaUnitsPerMs(settings?.maniaSpeed ?? 20) * unit) / rate
+  const scroll = settings?.maniaConstant ? [] : map.scroll
+  const nowPos = scrollPosition(scroll, time)
   const pressed = view.pressedRef.current ?? []
-  ctx.fillStyle = 'rgba(14, 10, 14, 0.92)'
-  ctx.fillRect(left, 0, colW * keys, h)
-  for (let c = 0; c < keys; c++) {
-    const x = left + c * colW
-    const mine = view.lanes.includes(c)
-    if (mine) {
-      ctx.fillStyle = 'rgba(255,102,170,0.06)'
-      ctx.fillRect(x, 0, colW, h)
+  const mine = new Set(view.lanes)
+  const mode = view.blackoutRef.current ?? 'off'
+  const hides = (k: number) => mode === 'all' || (mode === 'host' && !mine.has(k))
+  const now = performance.now()
+
+  if (mode === 'all') {
+    ctx.fillStyle = '#000'
+    ctx.fillRect(stageLeft, c.top, total, c.height)
+  }
+  for (let k = 0; k < keys; k++) {
+    const own = mine.has(k)
+    if (!own && mode !== 'off') {
+      ctx.fillStyle = '#000'
+      ctx.fillRect(xs[k], c.top, ws[k], c.height)
+      continue
     }
-    if (pressed[c]) {
-      const glow = ctx.createLinearGradient(0, judgeY, 0, judgeY - h * 0.3)
+    ctx.fillStyle = hides(k) ? 'rgb(18, 12, 18)' : own ? 'rgba(24, 14, 22, 0.92)' : 'rgba(14, 10, 14, 0.55)'
+    ctx.fillRect(xs[k], c.top, ws[k], c.height)
+    if (pressed[k]) {
+      const glow = ctx.createLinearGradient(0, judgeY, 0, judgeY - c.height * 0.3)
       glow.addColorStop(0, 'rgba(255,102,170,0.45)')
       glow.addColorStop(1, 'rgba(255,102,170,0)')
       ctx.fillStyle = glow
-      ctx.fillRect(x, judgeY - h * 0.3, colW, h * 0.3)
+      ctx.fillRect(xs[k], judgeY - c.height * 0.3, ws[k], c.height * 0.3)
     }
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)'
     ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(x, 0)
-    ctx.lineTo(x, h)
-    ctx.stroke()
+    ctx.strokeRect(xs[k] + 0.5, c.top, ws[k] - 1, c.height)
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'
-  ctx.fillRect(left, judgeY, colW * keys, 3)
 
-  const yFor = (t: number) => judgeY - ((t - time) / span) * judgeY
-  const start = firstVisible(notes, time - 150)
-  const noteH = Math.max(10, colW * 0.32)
-  for (let i = start; i < notes.length; i++) {
-    const note = notes[i]
-    if (note.time > time + span * 1.05) break
-    if (note.column >= keys) continue
-    const mine = view.lanes.includes(note.column)
-    const x = left + note.column * colW + 2
-    const headY = yFor(Math.max(note.time, note.end > note.time ? time : note.time))
-    if (hidden && headY > judgeY * 0.55 && note.end <= note.time) continue
-    ctx.globalAlpha = mine ? 1 : 0.25
-    const color = keys % 2 === 1 && note.column === (keys - 1) / 2 ? '#fcb81e' : note.column % 2 === 0 ? '#f4f4f5' : '#ff66aa'
-    if (note.end > note.time) {
-      if (note.end < time - 50) {
-        ctx.globalAlpha = 1
-        continue
+  const yFor = (t: number) => judgeY - (scrollPosition(scroll, t) - nowPos) * pxPerSongMs
+  const noteH = Math.max(6, 12 * unit)
+  const start = firstVisible(map.notes, time - MANIA_WINDOW_MS - MISS_FADE_MS)
+  for (let i = start; i < map.notes.length; i++) {
+    const note = map.notes[i]
+    // Scroll position only grows with time, so the first note above the stage ends the scan.
+    if (note.time > time && yFor(note.time) < c.top - noteH) break
+    const k = note.column
+    if (k >= keys) continue
+    const own = mine.has(k)
+    if (!own && mode !== 'off') continue
+    const hold = note.end > note.time
+    let state = judge.state[i]
+    if (state === HIT) continue
+    let alpha = 1
+    let headTime = note.time
+    if (own) {
+      if (state === PENDING && time > note.time + MANIA_WINDOW_MS) {
+        judge.state[i] = state = MISSED
+        judge.missedAt[i] = time
       }
-      const tailY = yFor(note.end)
-      ctx.fillStyle = color
-      ctx.globalAlpha *= 0.55
-      ctx.fillRect(x + colW * 0.15, tailY, colW - 4 - colW * 0.3, Math.max(0, headY - tailY))
-      ctx.globalAlpha = mine ? 1 : 0.25
-    } else if (note.time < time - 100) {
-      ctx.globalAlpha = 1
-      continue
+      if (state === HOLDING) {
+        headTime = Math.max(note.time, time)
+        // Held through the end: the release window passing finishes it.
+        if (time > note.end + MANIA_WINDOW_MS) {
+          judge.state[i] = HIT
+          judge.holding.delete(k)
+          continue
+        }
+      }
+      if (state === MISSED) {
+        const fadeFrom = hold ? Math.max(judge.missedAt[i], note.end) : judge.missedAt[i]
+        alpha = Math.max(0, 1 - (time - fadeFrom) / MISS_FADE_MS) * 0.45
+      }
+    } else {
+      // The host's notes leave at the judgement line; their holds shrink into it.
+      if (time >= note.end && (hold || time >= note.time)) continue
+      headTime = Math.max(note.time, time)
+      alpha = 0.4
     }
+    if (alpha <= 0) continue
+    const headY = yFor(headTime)
+    if (hidden && headY > c.top + (judgeY - c.top) * 0.55 && !hold) continue
+    const color = keys % 2 === 1 && k === (keys - 1) / 2 ? '#fcb81e' : k % 2 === 0 ? '#f4f4f5' : '#ff66aa'
     ctx.fillStyle = color
+    if (hold) {
+      const tailY = yFor(note.end)
+      ctx.globalAlpha = alpha * 0.55
+      ctx.fillRect(xs[k] + ws[k] * 0.15, tailY, ws[k] * 0.7, Math.max(0, headY - tailY))
+    }
+    ctx.globalAlpha = alpha
     ctx.beginPath()
-    ctx.roundRect(x, headY - noteH, colW - 4, noteH, 3)
+    ctx.roundRect(xs[k] + 1, headY - noteH, ws[k] - 2, noteH, 3)
     ctx.fill()
     ctx.globalAlpha = 1
+  }
+
+  // Judgement line, then hit bursts above it so they read over the notes.
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'
+  for (let k = 0; k < keys; k++) {
+    if (!mine.has(k) && mode !== 'off') continue
+    ctx.fillRect(xs[k], judgeY - 1, ws[k], 3)
+  }
+  for (let k = 0; k < keys; k++) {
+    const flash = 1 - (now - (judge.flashAt[k] ?? -Infinity)) / FLASH_MS
+    const holding = judge.holding.has(k)
+    const strength = holding ? Math.max(flash, 0.6) : flash
+    if (strength <= 0) continue
+    const glow = ctx.createRadialGradient(xs[k] + ws[k] / 2, judgeY, 0, xs[k] + ws[k] / 2, judgeY, ws[k] * 0.9)
+    glow.addColorStop(0, `rgba(${HIT_GLOW},${0.85 * strength})`)
+    glow.addColorStop(1, `rgba(${HIT_GLOW},0)`)
+    ctx.fillStyle = glow
+    ctx.fillRect(xs[k] - ws[k] * 0.4, judgeY - ws[k] * 0.9, ws[k] * 1.8, ws[k] * 1.8)
   }
 }
 
 export function LanePlayfield({
   map,
   mods,
+  skin,
   clockRef,
   leadMsRef,
+  videoRef,
   view,
 }: {
   map: Beatmap
   mods: number
+  skin: Skin | null
   clockRef: RefObject<SyncClock>
   leadMsRef: RefObject<number>
+  videoRef: RefObject<HTMLVideoElement | null>
   view: LaneView
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewRef = useRef(view)
   viewRef.current = view
+  const skinRef = useRef(skin)
+  skinRef.current = skin
 
   useEffect(() => {
     const canvas = canvasRef.current
+    const stage = canvas?.parentElement
     const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx) return
+    if (!canvas || !stage || !ctx) return
     const hidden = (mods & MOD_HIDDEN) !== 0
+    const taiko = () => viewRef.current.ruleset === RULESET_TAIKO
+    const count = () => (taiko() ? map.drums.length : map.notes.length)
+    let judge = newJudge(count())
+    let lastTime = -Infinity
     let frame = 0
     const draw = () => {
       frame = requestAnimationFrame(draw)
       const dpr = window.devicePixelRatio || 1
-      const w = canvas.clientWidth
-      const h = canvas.clientHeight
+      const w = stage.clientWidth
+      const h = stage.clientHeight
       if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
         canvas.width = Math.round(w * dpr)
         canvas.height = Math.round(h * dpr)
@@ -234,16 +438,34 @@ export function LanePlayfield({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
       const clock = clockRef.current
-      if (!clock) return
-      const time = clock.at(performance.now()) + clock.rate * (leadMsRef.current ?? 0)
-      const rate = clock.rate || 1
       const current = viewRef.current
-      if (current.ruleset === RULESET_TAIKO) drawTaiko(ctx, w, h, map.drums, time, rate, current, hidden)
-      else drawMania(ctx, w, h, map.notes, map.keys, time, rate, current, hidden)
+      const inputs = current.inputsRef.current ?? []
+      if (!clock?.ready) {
+        inputs.length = 0
+        return
+      }
+      const lead = clock.rate * (leadMsRef.current ?? 0)
+      const time = clock.at(performance.now()) + lead
+      // A retry or seek back starts the map over, so every note is pending again.
+      if (time < lastTime - 500 || judge.state.length !== count()) judge = newJudge(count())
+      lastTime = time
+      for (const input of inputs.splice(0)) {
+        const at = clock.at(input.at) + lead
+        if (taiko()) judgeTaiko(map.drums, judge, input, at)
+        else judgeMania(map.notes, judge, input, at)
+      }
+      const content = contentRect(stage, videoRef.current)
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(content.left, content.top, content.width, content.height)
+      ctx.clip()
+      if (taiko()) drawTaiko(ctx, content, map, judge, time, current, hidden)
+      else drawMania(ctx, content, map, skinRef.current, judge, time, clock.rate || 1, current, hidden)
+      ctx.restore()
     }
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [map, mods, clockRef, leadMsRef])
+  }, [map, mods, clockRef, leadMsRef, videoRef])
 
   return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 size-full" />
 }

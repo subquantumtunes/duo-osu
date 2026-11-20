@@ -20,6 +20,12 @@ export type DrumNote = { kind: 'don' | 'kat' | 'roll' | 'swell'; big: boolean; t
 
 export type ManiaNote = { column: number; time: number; end: number }
 
+/**
+ * A change in scroll speed from a timing point. `multiplier` is SV times the BPM relative to the
+ * map's most common BPM, and `pos` is the integrated scroll distance (in multiplied ms) at `time`.
+ */
+export type ScrollPoint = { time: number; pos: number; multiplier: number }
+
 export type Beatmap = {
   checksum: string
   title: string
@@ -35,6 +41,69 @@ export type Beatmap = {
   notes: ManiaNote[]
   /** Mania key count. */
   keys: number
+  /** BPM and SV scroll changes, for scrolling that follows the map's timing. */
+  scroll: ScrollPoint[]
+  /** Taiko scroll velocity at the most common BPM with no SV, in osu!px per ms. */
+  baseVelocity: number
+}
+
+/** Scroll distance at `time`: the time itself when scrolling ignores BPM, else BPM and SV integrated. */
+export function scrollPosition(scroll: ScrollPoint[], time: number) {
+  if (scroll.length === 0) return time
+  let lo = 0
+  let hi = scroll.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (scroll[mid].time <= time) lo = mid
+    else hi = mid - 1
+  }
+  const point = scroll[lo]
+  return point.pos + (time - point.time) * point.multiplier
+}
+
+/** Like osu!, weights each BPM by how long it lasts and picks the longest. */
+function mostCommonBeatLength(timing: TimingPoint[], lastTime: number) {
+  const red = timing.filter((t) => t.uninherited && t.beatLength > 0)
+  if (red.length === 0) return 500
+  const totals = new Map<number, number>()
+  red.forEach((point, i) => {
+    if (point.time > lastTime) return
+    const end = i + 1 < red.length ? red[i + 1].time : lastTime
+    const key = Math.round(point.beatLength * 1000) / 1000
+    totals.set(key, (totals.get(key) ?? 0) + Math.max(0, end - point.time))
+  })
+  let best = red[0].beatLength
+  let longest = -1
+  for (const [beatLength, duration] of totals) {
+    if (duration > longest) {
+      longest = duration
+      best = beatLength
+    }
+  }
+  return best
+}
+
+function buildScroll(timing: TimingPoint[], base: number): ScrollPoint[] {
+  const points: ScrollPoint[] = []
+  let beatLength = timing.find((t) => t.uninherited)?.beatLength ?? base
+  let sv = 1
+  for (const point of timing) {
+    if (point.uninherited) {
+      if (point.beatLength > 0) beatLength = point.beatLength
+      sv = 1
+    } else if (point.beatLength < 0) {
+      sv = Math.min(10, Math.max(0.01, -100 / point.beatLength))
+    }
+    const multiplier = (sv * base) / beatLength
+    const last = points[points.length - 1]
+    if (last && last.time === point.time) {
+      last.multiplier = multiplier
+      continue
+    }
+    const pos = last ? last.pos + (point.time - last.time) * last.multiplier : point.time
+    points.push({ time: point.time, pos, multiplier })
+  }
+  return points
 }
 
 export const MOD_EASY = 2
@@ -340,5 +409,14 @@ export function parseBeatmap(text: string, checksum: string): Beatmap | null {
     }
   }
 
-  return { checksum, title: readTitle(text), mode, cs, ar, objects, drums, notes, keys }
+  let lastTime = 0
+  for (const list of [objects, drums, notes]) {
+    const last = list[list.length - 1]
+    if (last) lastTime = Math.max(lastTime, last.end)
+  }
+  const base = mostCommonBeatLength(timing, lastTime)
+  const scroll = buildScroll(timing, base)
+  const baseVelocity = (sliderMultiplier * 100) / base
+
+  return { checksum, title: readTitle(text), mode, cs, ar, objects, drums, notes, keys, scroll, baseVelocity }
 }

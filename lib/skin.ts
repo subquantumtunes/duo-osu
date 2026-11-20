@@ -15,6 +15,67 @@ export type Skin = {
   sliderTrack: string | null
   overlayAboveNumber: boolean
   digitOverlap: number
+  /** The skin.ini `[Mania]` sections, keyed by their key count. */
+  mania: Map<number, ManiaLayout>
+}
+
+/** A mania stage as osu!stable lays it out, in its 480px-tall coordinate space. */
+export type ManiaLayout = { widths: number[]; spacing: number[]; hitPosition: number }
+
+const DEFAULT_COLUMN_WIDTH = 30
+const DEFAULT_HIT_POSITION = 402
+
+function numberList(value: string | undefined) {
+  return (value ?? '').split(',').map((p) => Number(p.trim()))
+}
+
+function parseManiaSections(text: string) {
+  const layouts = new Map<number, ManiaLayout>()
+  let section: Map<string, string> | null = null
+  const finish = () => {
+    if (!section) return
+    const keys = Number(section.get('keys'))
+    if (Number.isInteger(keys) && keys >= 1 && keys <= 18 && !layouts.has(keys)) {
+      layouts.set(keys, buildManiaLayout(keys, section))
+    }
+    section = null
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\/\/.*$/, '').trim()
+    const header = /^\[(.+)\]$/.exec(line)
+    if (header) {
+      finish()
+      if (header[1].trim().toLowerCase() === 'mania') section = new Map()
+      continue
+    }
+    const sep = line.indexOf(':')
+    if (section && sep > 0) section.set(line.slice(0, sep).trim().toLowerCase(), line.slice(sep + 1).trim())
+  }
+  finish()
+  return layouts
+}
+
+function buildManiaLayout(keys: number, values: Map<string, string> | null): ManiaLayout {
+  const widths = numberList(values?.get('columnwidth'))
+  const spacing = numberList(values?.get('columnspacing'))
+  const hit = Number(values?.get('hitposition'))
+  return {
+    widths: Array.from({ length: keys }, (_, i) => {
+      const w = widths[i]
+      return Number.isFinite(w) && w > 0 ? Math.min(w, 200) : DEFAULT_COLUMN_WIDTH
+    }),
+    spacing: Array.from({ length: Math.max(0, keys - 1) }, (_, i) => {
+      const s = spacing[i]
+      return Number.isFinite(s) ? Math.max(-100, Math.min(s, 200)) : 0
+    }),
+    // osu!stable keeps the judgement line in the lower half of the screen.
+    hitPosition: Number.isFinite(hit) ? Math.max(240, Math.min(hit, 480)) : DEFAULT_HIT_POSITION,
+  }
+}
+
+/** The host's column layout for a key count, or osu!'s defaults when the skin doesn't set one. */
+export function maniaLayoutFor(skin: Skin | null, keys: number): ManiaLayout {
+  return skin?.mania.get(keys) ?? buildManiaLayout(keys, null)
 }
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
@@ -82,7 +143,8 @@ export async function loadSkin(text: string): Promise<Skin | null> {
       (name) => decode(images[name]),
     ),
   )
-  const ini = parseIni(typeof payload.ini === 'string' ? payload.ini : '')
+  const iniText = typeof payload.ini === 'string' ? payload.ini : ''
+  const ini = parseIni(iniText)
   const comboColors = Array.from({ length: 8 }, (_, i) => rgb(ini.get(`colours.combo${i + 1}`))).filter(
     (c): c is string => c !== null,
   )
@@ -105,6 +167,7 @@ export async function loadSkin(text: string): Promise<Skin | null> {
     sliderTrack: rgb(ini.get('colours.slidertrackoverride')),
     overlayAboveNumber: above !== '0',
     digitOverlap: Number.isFinite(overlap) ? overlap : -2,
+    mania: parseManiaSections(iniText),
   }
 }
 

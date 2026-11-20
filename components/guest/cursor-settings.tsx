@@ -6,7 +6,7 @@ import { type CursorSettings, cursorColor } from '@/lib/cursor-settings'
 const HUE_TRACK =
   'linear-gradient(to right, hsl(0 100% 60%), hsl(60 100% 60%), hsl(120 100% 60%), hsl(180 100% 60%), hsl(240 100% 60%), hsl(300 100% 60%), hsl(360 100% 60%))'
 
-const THUMB =
+export const THUMB =
   '[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-background [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-background [&::-webkit-slider-thumb]:shadow'
 
 export function CursorSettingsPanel({
@@ -99,7 +99,7 @@ export function CursorSettingsPanel({
   )
 }
 
-function Toggle({
+export function Toggle({
   label,
   hint,
   checked,
