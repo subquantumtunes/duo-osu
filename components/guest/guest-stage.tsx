@@ -76,7 +76,8 @@ export function GuestStage({
   cursorStyleRef.current = cursorStyle
   const [blackout, setBlackout] = useState(false)
   const blackoutRef = useRef(false)
-  blackoutRef.current = blackout
+  // The setting is remembered, but only applied while a map is live so song select stays visible.
+  blackoutRef.current = blackout && inputLive
 
   useEffect(() => {
     setBlackout(localStorage.getItem(BLACKOUT_KEY) === '1')

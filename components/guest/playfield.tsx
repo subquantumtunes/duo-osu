@@ -358,15 +358,14 @@ export function Playfield({
       const content = contentRect(stage, videoRef.current)
       const field = playfieldRect(content)
       const radius = diff.radius * field.scale
+      const clock = clockRef.current
+      if (!clock?.ready) return
       if (blackoutRef?.current) {
         // Covers the stream's own circles (plus the radius they can overhang the playfield) so a
         // lagging picture can't be mistaken for the locally drawn notes. The HUD stays visible.
         ctx.fillStyle = '#000'
         ctx.fillRect(field.left - radius, field.top - radius, 512 * field.scale + radius * 2, 384 * field.scale + radius * 2)
       }
-
-      const clock = clockRef.current
-      if (!clock?.ready) return
       const time = clock.at(performance.now()) + clock.rate * (leadMsRef.current ?? 0)
       const toScreen = (x: number, y: number) => ({
         x: field.left + x * field.scale,
