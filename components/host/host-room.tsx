@@ -50,6 +50,8 @@ export function HostRoom() {
   )
   const onKey = useCallback(
     (k: TapSlot, down: boolean) => {
+      // The browser host's bridge only drives K1/K2; taiko and mania lanes need the desktop app.
+      if (k !== 'k1' && k !== 'k2') return
       setKeys((prev) => ({ ...prev, [k]: down }))
       send({ t: 'key', k, down })
     },

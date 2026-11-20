@@ -15,7 +15,7 @@ import {
   session,
   shell,
 } from 'electron'
-import { IPC, type ScreenSource } from '../shared/api'
+import { IPC, isTapSlot, type ScreenSource } from '../shared/api'
 import { GameAudio } from './game-audio'
 import { createInjector } from './input'
 import { OsuWatcher } from './osu-watcher'
@@ -138,6 +138,12 @@ function registerIpc() {
     return injector.setBindings(k1, k2)
   })
 
+  ipcMain.handle(IPC.setLaneBindings, (event, codes: unknown) => {
+    if (!fromHostWindow(event) || !Array.isArray(codes) || codes.length > 10) return false
+    if (!codes.every((code) => typeof code === 'string')) return false
+    return injector.setLaneBindings(codes)
+  })
+
   ipcMain.on(IPC.setClient, (event, client: unknown) => {
     if (!fromHostWindow(event) || (client !== 'stable' && client !== 'lazer')) return
     watcher.setClient(client)
@@ -150,7 +156,7 @@ function registerIpc() {
   })
 
   ipcMain.on(IPC.key, (event, slot: unknown, down: unknown) => {
-    if (!fromHostWindow(event) || (slot !== 'k1' && slot !== 'k2')) return
+    if (!fromHostWindow(event) || !isTapSlot(slot)) return
     if (down === true && !partnerInputAllowed()) return
     injector.key(slot, down === true)
   })

@@ -404,6 +404,34 @@ select {
   font-family: var(--mono);
 }
 
+.lanes {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.lane-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lane-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lane-keys .key {
+  min-width: 0;
+  flex: 1 1 48px;
+  padding-inline: 6px;
+}
+
+.lane-keys .key[data-partner] {
+  border-color: var(--primary);
+}
+
 .key[data-listening] {
   border-color: var(--primary);
   color: var(--primary);

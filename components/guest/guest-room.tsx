@@ -9,7 +9,9 @@ import { StatusBadge, pingTone } from '@/components/status-badge'
 import { KeyCapture } from '@/components/key-capture'
 import { useGuestSession } from '@/hooks/use-guest-session'
 import { useCursorSettings } from '@/lib/cursor-settings'
-import { GuestStage } from './guest-stage'
+import { GuestStage, type LaneControls } from './guest-stage'
+import { useLaneKeys } from './use-lane-keys'
+import { RULESET_MANIA, RULESET_TAIKO, isLaneRuleset, laneName } from '@/lib/lanes'
 import { CursorSettingsPanel } from './cursor-settings'
 
 export function GuestRoom({ code }: { code: string }) {
@@ -22,7 +24,23 @@ export function GuestRoom({ code }: { code: string }) {
   const [cursorStyle, updateCursorStyle] = useCursorSettings()
   // Older hosts don't say which map is live, so only check it when they do.
   const mapIsCurrent = session.sync?.map === undefined || session.sync.map === session.map?.checksum
-  const playfieldReady = Boolean(session.map && session.sync?.live && mapIsCurrent)
+  const ruleset = session.sync?.ruleset ?? null
+  const laneMode = isLaneRuleset(ruleset) && session.sync?.lanes ? ruleset : null
+  const [laneKeys, setLaneKey] = useLaneKeys(laneMode, session.sync?.keys ?? null)
+  const laneControls: LaneControls | null =
+    laneMode !== null && session.sync?.lanes
+      ? { ruleset: laneMode, lanes: session.sync.lanes, keys: session.sync.lanes.map((l) => laneKeys[l] ?? '') }
+      : null
+  // Each mode needs its own notes; converted maps only have them for taiko.
+  const mapFitsMode = (() => {
+    const map = session.map
+    if (!map) return false
+    if (ruleset === RULESET_TAIKO) return map.drums.length > 0
+    if (ruleset === RULESET_MANIA) return map.notes.length > 0 && map.keys === session.sync?.keys
+    if (ruleset === 2) return false
+    return map.objects.length > 0
+  })()
+  const playfieldReady = Boolean(session.map && session.sync?.live && mapIsCurrent && mapFitsMode)
   const usePlayfield = playfieldReady && !preferVideo
   const { setMode, transitRef } = session
 
@@ -77,7 +95,19 @@ export function GuestRoom({ code }: { code: string }) {
                   </p>
                 </div>
               </div>
-              {session.role === 'tap' && (
+              {session.role === 'tap' && laneControls && (
+                <div className="flex flex-wrap gap-3">
+                  {laneControls.lanes.map((lane, i) => (
+                    <KeyCapture
+                      key={lane}
+                      label={laneMode === RULESET_TAIKO ? laneName(RULESET_TAIKO, lane) : `Column ${lane + 1}`}
+                      value={laneControls.keys[i]}
+                      onChange={(key) => setLaneKey(lane, key)}
+                    />
+                  ))}
+                </div>
+              )}
+              {session.role === 'tap' && !laneControls && (
                 <div className="flex gap-3">
                   <KeyCapture label="Your K1" value={k1} onChange={setK1} />
                   <KeyCapture label="Your K2" value={k2} onChange={setK2} />
@@ -94,6 +124,7 @@ export function GuestRoom({ code }: { code: string }) {
               onRetryVideo={session.retryVideo}
               cursorStyle={cursorStyle}
               inputLive={Boolean(session.sync?.live)}
+              laneControls={session.role === 'tap' ? laneControls : null}
               playfield={
                 usePlayfield && session.map
                   ? {
@@ -102,6 +133,7 @@ export function GuestRoom({ code }: { code: string }) {
                       clockRef: session.clockRef,
                       leadMsRef,
                       skin: session.skin,
+                      laneRuleset: laneMode ?? undefined,
                     }
                   : null
               }

@@ -34,10 +34,7 @@
             <p class="preview-title">Nothing is being shared yet</p>
             <p class="muted">Pick a screen on the right, then start hosting.</p>
           </div>
-          <div class="keylights" aria-label="Partner keys">
-            <span id="light-k1" class="keylight">K1</span>
-            <span id="light-k2" class="keylight">K2</span>
-          </div>
+          <div id="keylights" class="keylights" aria-label="Partner keys"></div>
         </div>
 
         <div class="row">
@@ -99,6 +96,39 @@
               <span>K2 key in osu!</span>
               <button id="bind-k2" type="button" class="button key"></button>
             </label>
+          </div>
+          <div id="lanes" class="bindings lanes">
+            <p id="lane-hint" class="muted small" aria-live="polite"></p>
+            <label class="field">
+              <span>Taiko: partner plays</span>
+              <select id="taiko-split">
+                <option value="kat">Kat (rims)</option>
+                <option value="don">Don (centres)</option>
+                <option value="left">Left drum side</option>
+                <option value="right">Right drum side</option>
+              </select>
+            </label>
+            <div class="lane-group">
+              <span class="small">Taiko drum keys in osu!</span>
+              <div id="taiko-keys" class="lane-keys"></div>
+            </div>
+            <label class="field">
+              <span>Mania: partner plays</span>
+              <select id="mania-split">
+                <option value="right">Right hand</option>
+                <option value="left">Left hand</option>
+                <option value="all">Every column</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Mania key layout</span>
+              <select id="mania-count"></select>
+            </label>
+            <div class="lane-group">
+              <span class="small">Mania column keys in osu!</span>
+              <div id="mania-keys" class="lane-keys"></div>
+            </div>
+            <button id="reset-lanes" type="button" class="link">Reset keys to osu! defaults</button>
           </div>
         </section>
 
