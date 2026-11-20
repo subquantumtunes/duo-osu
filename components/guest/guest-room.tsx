@@ -17,7 +17,7 @@ import { LaneSettingsPanel } from './lane-settings'
 import { useLaneSettings } from '@/lib/lane-settings'
 import { useStandardSettings } from '@/lib/standard-settings'
 import { StandardSettingsPanel } from './standard-settings'
-import { useJudgementSetting } from '@/lib/judgements'
+import { useJudgementSettings } from '@/lib/judgements'
 import { JudgementSettingsPanel } from './judgement-settings'
 
 export function GuestRoom({ code }: { code: string }) {
@@ -30,7 +30,7 @@ export function GuestRoom({ code }: { code: string }) {
   const [cursorStyle, updateCursorStyle] = useCursorSettings()
   const [laneSettings, updateLaneSettings] = useLaneSettings()
   const [standardSettings, updateStandardSettings] = useStandardSettings()
-  const [showJudgements, setShowJudgements] = useJudgementSetting()
+  const [showJudgements, setShowJudgements] = useJudgementSettings()
   // Older hosts don't say which map is live, so only check it when they do.
   const mapIsCurrent = session.sync?.map === undefined || session.sync.map === session.map?.checksum
   const ruleset = session.sync?.ruleset ?? null
@@ -161,7 +161,7 @@ export function GuestRoom({ code }: { code: string }) {
               videoLatency={session.videoLatency}
               audio={session.audio}
             />
-            <JudgementSettingsPanel on={showJudgements} onChange={setShowJudgements} />
+            <JudgementSettingsPanel style={showJudgements} onChange={setShowJudgements} />
             {session.role === 'tap' && laneMode !== null && (
               <LaneSettingsPanel ruleset={laneMode} settings={laneSettings} onChange={updateLaneSettings} />
             )}

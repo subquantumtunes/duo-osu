@@ -28,7 +28,7 @@ const BLACKOUT_OPTIONS: { value: ManiaBlackout; label: string }[] = [
 
 const HUE_GRADIENT = `linear-gradient(to right, ${[0, 60, 120, 180, 240, 300, 359].map(noteHueColor).join(', ')})`
 
-function RangeSetting({
+export function RangeSetting({
   id,
   label,
   display,

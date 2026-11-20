@@ -7,7 +7,7 @@ import { RULESET_TAIKO } from '@/lib/lanes'
 import { DEFAULT_COMBO_Y, DEFAULT_JUDGE_Y, type LaneSettings, laneColor, type ManiaBlackout, maniaUnitsPerMs, noteHueColor } from '@/lib/lane-settings'
 import { type Skin, maniaLayoutFor } from '@/lib/skin'
 import type { SyncClock } from '@/lib/sync-clock'
-import { type ComboState, JUDGEMENT_MS, type JudgementEvent, drawCombo, drawJudgement } from '@/lib/judgements'
+import { type ComboState, type JudgementEvent, type JudgementStyle, drawCombo, drawJudgement } from '@/lib/judgements'
 
 const DON = '#eb4f4f'
 const KAT = '#4fa9eb'
@@ -42,7 +42,7 @@ export type LaneView = {
   judgementsRef?: RefObject<JudgementEvent[]>
   /** The host's combo, drawn with the judgements. */
   comboRef?: RefObject<ComboState>
-  judgementsOnRef?: RefObject<boolean>
+  judgementStyleRef?: RefObject<JudgementStyle>
 }
 
 type Rect = { left: number; top: number; width: number; height: number }
@@ -494,8 +494,9 @@ export function LanePlayfield({
       ctx.clip()
       if (taiko()) drawTaiko(ctx, content, map, judge, time, current, hidden)
       else drawMania(ctx, content, map, skinRef.current, judge, time, clock.rate || 1, current, hidden)
-      const events = current.judgementsOnRef?.current ? current.judgementsRef?.current : null
-      if (events) {
+      const judgementStyle = current.judgementStyleRef?.current
+      const events = judgementStyle?.on ? current.judgementsRef?.current : null
+      if (events && judgementStyle) {
         const now = performance.now()
         const unit = content.height / 480
         // Taiko shows judgements above the hit circle; mania on the stage at the partner's chosen height.
@@ -506,8 +507,18 @@ export function LanePlayfield({
           content.top + content.height * ((current.settingsRef.current?.maniaJudgeY ?? DEFAULT_JUDGE_Y) / 100)
         const y = taiko() ? content.top + 110 * unit : maniaY
         for (const event of events) {
-          if (now - event.shown > JUDGEMENT_MS) continue
-          drawJudgement(ctx, event, current.ruleset, x, y, (taiko() ? 26 : 30) * unit, now)
+          if (now - event.shown > judgementStyle.duration) continue
+          drawJudgement(
+            ctx,
+            event,
+            current.ruleset,
+            x,
+            y,
+            (taiko() ? 26 : 30) * unit,
+            now,
+            judgementStyle,
+            skinRef.current,
+          )
         }
         const combo = current.comboRef?.current
         if (combo) {
