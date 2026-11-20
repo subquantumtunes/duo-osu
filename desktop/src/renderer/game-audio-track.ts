@@ -44,7 +44,7 @@ async function createOpusEncoder(onPacket: OpusSink): Promise<AudioEncoder | nul
           chunk.copyTo(bytes)
           onPacket(bytes)
         },
-        error: (err) => console.warn('[osu-coop] opus encoder error:', err),
+        error: (err) => console.warn('[duosu] opus encoder error:', err),
       })
       encoder.configure(config)
       return encoder

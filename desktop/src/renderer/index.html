@@ -7,14 +7,14 @@
       content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>osu! co-op host</title>
+    <title>duosu host</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span>osu! co-op</span>
+        <span>duosu</span>
         <span class="brand-sub">host</span>
         <span id="build-id" class="brand-sub"></span>
       </div>
@@ -46,7 +46,10 @@
             <code id="room-code" class="room-code">------</code>
             <p id="room-hint" class="muted small">Start hosting to get a code for your partner.</p>
         <p id="audio-hint" class="muted small" aria-live="polite"></p>
-            <button id="copy-code" type="button" class="button" disabled>Copy code</button>
+            <div class="button-row">
+              <button id="copy-code" type="button" class="button" disabled>Copy code</button>
+              <button id="kick-partner" type="button" class="button" hidden>Kick partner</button>
+            </div>
           </div>
 
           <div class="card">

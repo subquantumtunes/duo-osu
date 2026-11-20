@@ -11,7 +11,7 @@ export function SiteHeader({ children }: { children?: React.ReactNode }) {
           2P
         </span>
         <span>
-          osu! <span className="text-primary">co-op</span>
+          duo<span className="text-primary">su</span>
         </span>
       </Link>
       {children}

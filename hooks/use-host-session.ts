@@ -9,6 +9,8 @@ import {
   type TapSlot,
   chunkText,
   ROOM_PREFIX,
+  PEER_TIMEOUT_MS,
+  type PartnerExit,
   decodeInput,
   encodeClock,
   makeRoomCode,
@@ -113,6 +115,9 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
   const [surface, setSurface] = useState<string | null>(null)
   const [rtt, setRtt] = useState<number | null>(null)
   const [partner, setPartner] = useState<PartnerStats | null>(null)
+  const [partnerExit, setPartnerExit] = useState<PartnerExit | null>(null)
+  const lastPingRef = useRef(0)
+  const kickedRef = useRef(new Set<string>())
 
   const syncRef = useRef<SyncState>({ live: false, mods: 0 })
   const mapRef = useRef<MapFile | null>(null)
@@ -159,14 +164,18 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     videoCallRef.current = null
     inputRef.current?.close()
     inputRef.current = null
+    const ctrl = ctrlRef.current
     ctrlRef.current = null
+    ctrl?.close()
     guestIdRef.current = null
     lastAimSeq.current = 0
     lastKeySeq.current = 0
     inputConfirmed.current = false
   }, [])
 
-  const dropGuest = useCallback(() => {
+  const dropGuest = useCallback((exit: PartnerExit = 'left') => {
+    if (!guestIdRef.current) return
+    setPartnerExit(exit)
     handlersRef.current.onRelease()
     closeLink()
     setRtt(null)
@@ -217,6 +226,9 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
       case 'release':
         handlersRef.current.onRelease()
         break
+      case 'bye':
+        dropGuest('left')
+        break
       case 'video-retry': {
         const now = performance.now()
         if (now - lastRetry.current < RETRY_COOLDOWN_MS) return
@@ -225,6 +237,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         break
       }
       case 'ping': {
+        lastPingRef.current = performance.now()
         const ctrl = ctrlRef.current
         ctrl?.send({ t: 'pong', ts: msg.ts } satisfies HostMessage)
         void readEncodedFrames(videoCallRef.current?.peerConnection)
@@ -246,7 +259,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
         break
       }
     }
-  }, [applyAim, applyKey, callVideo])
+  }, [applyAim, applyKey, callVideo, dropGuest])
 
   const stop = useCallback(() => {
     handlersRef.current.onRelease()
@@ -258,6 +271,8 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     setStream(null)
     setRoomCode(null)
     setRtt(null)
+    setPartner(null)
+    setPartnerExit(null)
     setStatus('idle')
   }, [])
 
@@ -268,7 +283,7 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     try {
       media = await requestScreenShare()
     } catch (err) {
-      console.error('[osu-coop] getDisplayMedia failed:', err)
+      console.error('[duosu] getDisplayMedia failed:', err)
       setStatus('idle')
       setError(describeShareError(err))
       return
@@ -305,6 +320,13 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     })
 
     peer.on('connection', (conn) => {
+      if (kickedRef.current.has(conn.peer)) {
+        conn.on('open', () => {
+          conn.send({ t: 'kicked' } satisfies HostMessage)
+          setTimeout(() => conn.close(), 500)
+        })
+        return
+      }
       if (guestIdRef.current && guestIdRef.current !== conn.peer) {
         conn.on('open', () => {
           conn.send({ t: 'full' } satisfies HostMessage)
@@ -331,10 +353,17 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
           callVideo(true)
           const audio = current.getAudioTracks()
           callsRef.current = audio.length > 0 ? [peer.call(conn.peer, new MediaStream(audio))] : []
+          lastPingRef.current = performance.now()
+          setPartnerExit(null)
           setStatus('connected')
         })
-        conn.on('close', dropGuest)
-        conn.on('error', dropGuest)
+        // A stale link closing late must not drop whoever joined after it.
+        conn.on('close', () => {
+          if (ctrlRef.current === conn) dropGuest('left')
+        })
+        conn.on('error', () => {
+          if (ctrlRef.current === conn) dropGuest('lost')
+        })
       }
     })
   }, [callVideo, dropGuest, handleInput, handleMessage, stop])
@@ -346,6 +375,27 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
   }, [guestRole])
 
   useEffect(() => stop, [stop])
+
+  // A closed tab or dropped network often never fires a close event, so watch the partner's pings.
+  useEffect(() => {
+    if (status !== 'connected') return
+    const id = setInterval(() => {
+      if (ctrlRef.current && performance.now() - lastPingRef.current > PEER_TIMEOUT_MS) dropGuest('lost')
+    }, 1000)
+    return () => clearInterval(id)
+  }, [status, dropGuest])
+
+  const kick = useCallback(() => {
+    const ctrl = ctrlRef.current
+    const guest = guestIdRef.current
+    if (!guest) return
+    kickedRef.current.add(guest)
+    // Detach first so the close that follows isn't reported as the partner leaving.
+    ctrlRef.current = null
+    if (ctrl?.open) ctrl.send({ t: 'kicked' } satisfies HostMessage)
+    dropGuest('kicked')
+    setTimeout(() => ctrl?.close(), 300)
+  }, [dropGuest])
 
   const publishSync = useCallback((next: SyncState) => {
     const prev = syncRef.current
@@ -381,6 +431,8 @@ export function useHostSession(guestRole: Role, handlers: Handlers) {
     surface,
     rtt,
     partner,
+    partnerExit,
+    kick,
     start,
     stop,
     publishSync,

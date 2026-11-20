@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Copy, MonitorUp, Square, TriangleAlert } from 'lucide-react'
+import { Check, Copy, MonitorUp, Square, TriangleAlert, UserX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { useHostSession } from '@/hooks/use-host-session'
 import { Panel } from './panel'
@@ -48,13 +48,27 @@ export function SessionPanel({ session, bridgeReady }: { session: Session; bridg
               {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
               {copied ? 'Copied' : 'Copy invite link'}
             </Button>
+            {session.status === 'connected' && (
+              <Button variant="outline" onClick={session.kick}>
+                <UserX aria-hidden="true" />
+                Kick partner
+              </Button>
+            )}
             <Button variant="destructive" onClick={session.stop}>
               <Square aria-hidden="true" />
               Stop
             </Button>
           </div>
           <p className="text-xs text-muted-foreground" aria-live="polite">
-            {session.status === 'connected' ? 'Partner connected — go play!' : 'Waiting for your partner to join…'}
+            {session.status === 'connected'
+              ? 'Partner connected — go play!'
+              : session.partnerExit === 'left'
+                ? 'Your partner left. The room is still open — share the code to invite someone else.'
+                : session.partnerExit === 'lost'
+                  ? 'Lost connection to your partner. They can rejoin with the same code.'
+                  : session.partnerExit === 'kicked'
+                    ? 'Partner removed. Share the code to invite someone else.'
+                    : 'Waiting for your partner to join…'}
           </p>
         </>
       )}

@@ -210,11 +210,18 @@ function render() {
 
   $('room-code').textContent = session.roomCode ?? '------'
   $<HTMLButtonElement>('copy-code').disabled = !session.roomCode
+  $('kick-partner').hidden = session.status !== 'connected'
   $('room-hint').textContent =
     session.status === 'connected'
       ? 'Your partner is connected.'
-      : session.roomCode
-        ? 'Your partner opens the co-op site and enters this code.'
+      : session.roomCode && session.partnerExit === 'left'
+        ? 'Your partner left. The room is still open for someone else.'
+        : session.roomCode && session.partnerExit === 'lost'
+          ? 'Lost connection to your partner. They can rejoin with the same code.'
+          : session.roomCode && session.partnerExit === 'kicked'
+            ? 'Partner removed. Share the code with someone else.'
+            : session.roomCode
+        ? 'Your partner opens the duosu site and enters this code.'
         : session.status === 'starting'
           ? 'Starting…'
           : 'Start hosting to get a code for your partner.'
@@ -252,7 +259,7 @@ function render() {
     : waitingForMap
       ? 'Waiting for the beatmap file of the selected difficulty. Your partner follows the stream until it is found.'
       : settings.client === 'lazer'
-      ? 'Your partner sees the co-op site’s own circles. Lazer skins can’t be read from outside the game.'
+      ? 'Your partner sees the duosu site’s own circles. Lazer skins can’t be read from outside the game.'
       : 'Your partner sees the circles from the skin you have selected in osu!.'
   $('client-hint').toggleAttribute('data-warn', mismatch)
 
@@ -315,6 +322,8 @@ function wireControls() {
       session.stop()
     }
   })
+
+  $('kick-partner').addEventListener('click', () => session.kick())
 
   $('copy-code').addEventListener('click', async () => {
     if (!session.roomCode) return

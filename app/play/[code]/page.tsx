@@ -3,7 +3,7 @@ import { GuestRoom } from '@/components/guest/guest-room'
 import { normalizeRoomCode } from '@/lib/protocol'
 
 export const metadata: Metadata = {
-  title: 'Join — osu! co-op',
+  title: 'Join — duosu',
   description: 'Watch your partner’s osu! game and play your half of the controls.',
 }
 

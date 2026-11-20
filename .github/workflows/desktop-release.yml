@@ -47,7 +47,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-${{ github.run_number }}
-          name: dosu build ${{ github.run_number }}
+          name: duosu build ${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          files: desktop/release/dosu-Setup.exe
+          files: desktop/release/duosu-Setup.exe
           make_latest: true

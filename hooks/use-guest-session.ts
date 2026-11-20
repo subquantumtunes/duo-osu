@@ -8,6 +8,7 @@ import {
   type Role,
   type TapSlot,
   ROOM_PREFIX,
+  PEER_TIMEOUT_MS,
   decodeInput,
   encodeAim,
   encodeKey,
@@ -105,6 +106,7 @@ const FALLBACK_AIM_MS = 8
 export function useGuestSession(code: string) {
   const [status, setStatus] = useState<GuestStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [kicked, setKicked] = useState(false)
   const [role, setRole] = useState<Role | null>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [rtt, setRtt] = useState<number | null>(null)
@@ -144,6 +146,7 @@ export function useGuestSession(code: string) {
   const probeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const keySeq = useRef(0)
   const rttRef = useRef<number | undefined>(undefined)
+  const lastPongRef = useRef(0)
 
   const resetLink = () => {
     if (probeTimer.current) clearInterval(probeTimer.current)
@@ -209,9 +212,15 @@ export function useGuestSession(code: string) {
   }
 
   const leave = useCallback(() => {
-    if (ctrlRef.current?.open) ctrlRef.current.send({ t: 'release' } satisfies GuestMessage)
-    peerRef.current?.destroy()
+    const ctrl = ctrlRef.current
+    if (ctrl?.open) {
+      ctrl.send({ t: 'release' } satisfies GuestMessage)
+      ctrl.send({ t: 'bye' } satisfies GuestMessage)
+    }
+    const peer = peerRef.current
     peerRef.current = null
+    // Give the goodbye a moment to leave before the connection is torn down.
+    setTimeout(() => peer?.destroy(), 200)
     resetLink()
     directRef.current?.close()
     directRef.current = null
@@ -282,6 +291,7 @@ export function useGuestSession(code: string) {
         const msg = raw as HostMessage
         if (msg.t === 'welcome') {
           if (!videoSinceRef.current) videoSinceRef.current = performance.now()
+          lastPongRef.current = performance.now()
           setRole(msg.guestRole)
           setStatus('connected')
         } else if (msg.t === 'host-video') {
@@ -289,6 +299,7 @@ export function useGuestSession(code: string) {
         } else if (msg.t === 'pong') {
           const value = Math.round(performance.now() - msg.ts)
           rttRef.current = value
+          lastPongRef.current = performance.now()
           transitRef.current = value / 2
           setRtt(value)
         } else if (msg.t === 'input-ok') {
@@ -303,13 +314,24 @@ export function useGuestSession(code: string) {
           setError('This room already has a partner.')
           setStatus('error')
           peer.destroy()
+        } else if (msg.t === 'kicked') {
+          peerRef.current = null
+          peer.destroy()
+          resetLink()
+          setStream(null)
+          setRole(null)
+          setError('The host removed you from this session.')
+          setKicked(true)
+          setStatus('ended')
         }
       })
       ctrl.on('close', () => {
         if (peerRef.current === peer) {
           resetLink()
+          setError('The host ended the session.')
           setStatus('ended')
           setStream(null)
+          setRole(null)
         }
       })
     })
@@ -396,6 +418,17 @@ export function useGuestSession(code: string) {
       } catch {}
 
       const now = performance.now()
+      const peer = peerRef.current
+      if (peer && now - lastPongRef.current > PEER_TIMEOUT_MS) {
+        peerRef.current = null
+        peer.destroy()
+        resetLink()
+        setStream(null)
+        setRole(null)
+        setError('Lost connection to the host.')
+        setStatus('ended')
+        return
+      }
       const issue = diagnose(pc, frames, bytes, hostVideoRef.current, now - videoSinceRef.current)
       if (issue === null) retriesRef.current = 0
       else if (issue !== 'connecting' && retriesRef.current < AUTO_RETRIES && ctrlRef.current?.open) {
@@ -436,6 +469,16 @@ export function useGuestSession(code: string) {
     ctrl.send({ t: 'video-retry' } satisfies GuestMessage)
   }, [])
 
+  // Closing the tab: tell the host right away instead of leaving it to time out.
+  useEffect(() => {
+    if (status !== 'connected') return
+    const onHide = () => {
+      if (ctrlRef.current?.open) ctrlRef.current.send({ t: 'bye' } satisfies GuestMessage)
+    }
+    window.addEventListener('pagehide', onHide)
+    return () => window.removeEventListener('pagehide', onHide)
+  }, [status])
+
   useEffect(
     () => () => {
       peerRef.current?.destroy()
@@ -473,6 +516,7 @@ export function useGuestSession(code: string) {
   return {
     status,
     error,
+    kicked,
     role,
     stream,
     rtt,

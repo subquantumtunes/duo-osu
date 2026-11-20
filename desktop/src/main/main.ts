@@ -151,7 +151,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: '#0b0b10',
-    title: 'osu! co-op host',
+    title: 'duosu host',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -207,18 +207,18 @@ app.whenReady().then(() => {
     TOSU_PORT,
     path.join(app.getPath('userData'), 'tosu'),
     app.isPackaged ? path.join(process.resourcesPath, 'tosu') : null,
-    (message) => win?.setTitle(`osu! co-op host — ${message}`),
+    (message) => win?.setTitle(`duosu host — ${message}`),
   )
   tosu
     .ensure()
-    .then(() => win?.setTitle('osu! co-op host'))
+    .then(() => win?.setTitle('duosu host'))
     .catch((error: unknown) => {
-      win?.setTitle('osu! co-op host')
+      win?.setTitle('duosu host')
       const detail = error instanceof Error ? error.message : String(error)
       void dialog.showMessageBox({
         type: 'warning',
         title: 'tosu',
-        message: 'dosu could not start tosu automatically.',
+        message: 'duosu could not start tosu automatically.',
         detail: `${detail}\n\nYou can download tosu from github.com/tosuapp/tosu and run it yourself.`,
       })
     })

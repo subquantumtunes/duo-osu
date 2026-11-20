@@ -5,6 +5,8 @@ export type GuestMessage =
   | { t: 'key'; k: TapSlot; down: boolean; n: number }
   | { t: 'aim'; s: number; x: number; y: number }
   | { t: 'release' }
+  /** The partner is leaving on purpose (Leave button or closing the tab). */
+  | { t: 'bye' }
   | { t: 'video-retry' }
   /** The partner is playing the direct Opus packets, so the host can drop the WebRTC audio call. */
   | { t: 'audio-direct' }
@@ -27,6 +29,8 @@ export type HostMessage =
   | { t: 'pong'; ts: number }
   | { t: 'host-video'; frames: number; live: boolean }
   | { t: 'full' }
+  /** The host removed this partner; the room stays open for someone else. */
+  | { t: 'kicked' }
   | { t: 'input-ok' }
   /** `map` is the checksum of the map osu! is on; older hosts leave it out. */
   | { t: 'sync'; live: boolean; mods: number; map?: string | null }
@@ -69,6 +73,12 @@ function encodedBytes(code: number, pair: boolean) {
   if (code < 0x800) return 2
   return 3
 }
+
+/** Pings arrive every second; this much silence means the other side is gone even if no close event fired. */
+export const PEER_TIMEOUT_MS = 6000
+
+/** Why the host's partner slot emptied. */
+export type PartnerExit = 'left' | 'lost' | 'kicked'
 
 export const ROOM_PREFIX = 'osu-coop-v1-'
 export const DEFAULT_BRIDGE_PORT = 7273

@@ -127,6 +127,7 @@ export function GuestRoom({ code }: { code: string }) {
             code={code}
             status={session.status}
             error={session.error}
+            kicked={session.kicked}
             onJoin={session.join}
           />
         )}
@@ -194,11 +195,13 @@ function JoinCard({
   code,
   status,
   error,
+  kicked,
   onJoin,
 }: {
   code: string
   status: string
   error: string | null
+  kicked: boolean
   onJoin: () => void
 }) {
   return (
@@ -206,13 +209,17 @@ function JoinCard({
       <span className="text-sm text-muted-foreground">Joining room</span>
       <h1 className="font-mono text-4xl font-semibold tracking-[0.25em] text-primary">{code}</h1>
       <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
-        {status === 'ended'
+        {kicked
+          ? 'The host freed up this room for another partner.'
+          : status === 'ended'
           ? 'The session ended.'
           : 'You’ll see the host’s game and play your half of the controls. The host decides who aims and who taps.'}
       </p>
-      <Button size="lg" className="px-5" onClick={onJoin} disabled={status === 'connecting'}>
-        {status === 'connecting' ? 'Connecting…' : status === 'ended' || status === 'error' ? 'Try again' : 'Join session'}
-      </Button>
+      {!kicked && (
+        <Button size="lg" className="px-5" onClick={onJoin} disabled={status === 'connecting'}>
+          {status === 'connecting' ? 'Connecting…' : status === 'ended' || status === 'error' ? 'Rejoin' : 'Join session'}
+        </Button>
+      )}
       {error && (
         <p className="text-sm text-destructive" role="alert">
           {error}

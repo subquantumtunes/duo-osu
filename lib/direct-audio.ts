@@ -150,7 +150,7 @@ export class DirectAudio {
       this.resume()
       return true
     } catch (err) {
-      console.warn('[osu-coop] direct audio unavailable:', err)
+      console.warn('[duosu] direct audio unavailable:', err)
       return false
     }
   }
@@ -159,7 +159,7 @@ export class DirectAudio {
     const decoder = new AudioDecoder({
       output: (data) => this.play(data),
       error: (err) => {
-        console.warn('[osu-coop] opus decoder error:', err)
+        console.warn('[duosu] opus decoder error:', err)
         if (this.decoder === decoder) this.decoder = null
       },
     })
