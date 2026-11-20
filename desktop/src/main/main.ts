@@ -72,12 +72,33 @@ function send(channel: string, ...args: unknown[]) {
   win.webContents.send(channel, ...args)
 }
 
-/** The partner only drives input while a map is being played, never in menus or song select. */
+/** tosu updates the clock at least every ~100 ms during a play, so this long without movement is a pause. */
+const PAUSE_STALL_MS = 300
+
+/**
+ * The partner only drives input while a map is actually running: never in menus, song select,
+ * or on the pause menu, where the host needs the mouse and keyboard back.
+ */
 function partnerInputAllowed() {
-  return watcher.status.source !== null && watcher.status.state === OSU_PLAYING
+  return (
+    watcher.status.source !== null &&
+    watcher.status.state === OSU_PLAYING &&
+    performance.now() - watcher.clockMovedAt < PAUSE_STALL_MS
+  )
 }
 
 let wasPlaying = false
+let inputWasAllowed = false
+let inputGate: NodeJS.Timeout | null = null
+
+/** Lets go of every key the partner is holding the moment a pause (or any stop) begins. */
+function watchInputGate() {
+  inputGate = setInterval(() => {
+    const allowed = partnerInputAllowed()
+    if (inputWasAllowed && !allowed) injector.releaseAll()
+    inputWasAllowed = allowed
+  }, 50)
+}
 
 const watcher = new OsuWatcher(TOSU_PORT, {
   status: (status) => {
@@ -297,6 +318,7 @@ app.whenReady().then(() => {
   registerIpc()
   createWindow()
   watcher.start()
+  watchInputGate()
 
   tosu = new TosuManager(
     TOSU_PORT,
@@ -325,10 +347,28 @@ app.on('second-instance', () => {
   win.focus()
 })
 
-app.on('window-all-closed', () => app.quit())
+let shutDown = false
 
-app.on('will-quit', () => {
-  tosu?.stop()
+/** Stops everything duosu started, so nothing (tosu, audio capture, held keys) outlives the app. */
+function shutdown() {
+  if (shutDown) return
+  shutDown = true
+  if (inputGate) clearInterval(inputGate)
+  inputGate = null
+  stopTracking()
+  gameAudio.stop()
   watcher.stop()
+  tosu?.stop()
   injector.dispose()
-})
+}
+
+app.on('window-all-closed', () => app.quit())
+app.on('before-quit', shutdown)
+app.on('will-quit', shutdown)
+process.on('exit', shutdown)
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  process.on(signal, () => {
+    shutdown()
+    app.quit()
+  })
+}

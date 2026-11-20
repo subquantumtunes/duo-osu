@@ -1,4 +1,4 @@
-import { type ChildProcess, execFile, spawn } from 'node:child_process'
+import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import net from 'node:net'
@@ -37,15 +37,15 @@ async function findExe(dir: string): Promise<string | null> {
   return null
 }
 
-async function download(dir: string, onStatus: (message: string) => void) {
+async function download(dir: string, onStatus: (message: string) => void, signal: AbortSignal) {
   onStatus('Downloading tosu…')
-  const res = await fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json' } })
+  const res = await fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json' }, signal })
   if (!res.ok) throw new Error(`GitHub answered ${res.status} when looking up tosu`)
   const release = (await res.json()) as Release
   const asset = release.assets.find((a) => /^tosu-windows-.*\.zip$/i.test(a.name))
   if (!asset) throw new Error(`tosu ${release.tag_name} has no Windows download`)
 
-  const file = await fetch(asset.browser_download_url)
+  const file = await fetch(asset.browser_download_url, { signal })
   if (!file.ok || !file.body) throw new Error(`tosu download failed (${file.status})`)
 
   await fs.rm(dir, { recursive: true, force: true })
@@ -54,14 +54,11 @@ async function download(dir: string, onStatus: (message: string) => void) {
   await pipeline(Readable.fromWeb(file.body as WebReadableStream), createWriteStream(zip))
 
   onStatus('Unpacking tosu…')
-  await run('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
-    zip,
-    dir,
-  ])
+  await run(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', 'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force', zip, dir],
+    { windowsHide: true, signal },
+  )
   await fs.rm(zip, { force: true })
 }
 
@@ -79,6 +76,7 @@ async function copyBundled(from: string, to: string) {
  */
 export class TosuManager {
   private child: ChildProcess | null = null
+  private readonly abort = new AbortController()
 
   constructor(
     private readonly port: number,
@@ -96,10 +94,11 @@ export class TosuManager {
       exe = await findExe(this.dir)
     }
     if (!exe) {
-      await download(this.dir, this.onStatus)
+      await download(this.dir, this.onStatus, this.abort.signal)
       exe = await findExe(this.dir)
       if (!exe) throw new Error('tosu was downloaded but tosu.exe was not found in it')
     }
+    if (this.abort.signal.aborted) return
 
     this.onStatus('Starting tosu…')
     const child = spawn(exe, [], { cwd: path.dirname(exe), windowsHide: true, stdio: 'ignore' })
@@ -109,8 +108,16 @@ export class TosuManager {
     this.child = child
   }
 
+  /** Cancels a download in progress and ends the tosu duosu started, along with anything it spawned. */
   stop() {
-    this.child?.kill()
+    this.abort.abort()
+    const child = this.child
     this.child = null
+    if (!child || child.exitCode !== null || child.pid === undefined) return
+    try {
+      execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 3000, stdio: 'ignore' })
+    } catch {
+      child.kill()
+    }
   }
 }
