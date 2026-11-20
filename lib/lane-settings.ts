@@ -28,8 +28,10 @@ export type LaneSettings = {
   laneHue: number
   laneBrightness: number
   laneOpacity: number
-  /** Height of the mania judgements and combo, as a percentage of the screen from the top. */
+  /** Height of the mania judgements, as a percentage of the screen from the top. */
   maniaJudgeY: number
+  /** Height of the mania combo counter, as a percentage of the screen from the top. */
+  maniaComboY: number
 }
 
 export const DEFAULT_LANE_SETTINGS: LaneSettings = {
@@ -47,9 +49,11 @@ export const DEFAULT_LANE_SETTINGS: LaneSettings = {
   laneBrightness: 8,
   laneOpacity: 92,
   maniaJudgeY: 42,
+  maniaComboY: 34,
 }
 
 export const DEFAULT_JUDGE_Y = 42
+export const DEFAULT_COMBO_Y = 34
 export const JUDGE_Y_MIN = 10
 export const JUDGE_Y_MAX = 85
 

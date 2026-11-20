@@ -194,13 +194,24 @@ export function LaneSettingsPanel({
 
           <RangeSetting
             id={`${id}-judge-y`}
-            label="Judgement & combo height"
+            label="Judgement height"
             display={`${settings.maniaJudgeY}%`}
             min={JUDGE_Y_MIN}
             max={JUDGE_Y_MAX}
             value={settings.maniaJudgeY}
             onChange={(maniaJudgeY) => onChange({ maniaJudgeY })}
-            hint="Moves the judgements and combo counter up or down the stage. Lower is higher on screen."
+            hint="Moves the 100/50/miss judgements up or down the stage. Lower is higher on screen."
+          />
+
+          <RangeSetting
+            id={`${id}-combo-y`}
+            label="Combo height"
+            display={`${settings.maniaComboY}%`}
+            min={JUDGE_Y_MIN}
+            max={JUDGE_Y_MAX}
+            value={settings.maniaComboY}
+            onChange={(maniaComboY) => onChange({ maniaComboY })}
+            hint="Moves the combo counter up or down the stage. Set it below the judgements to put them on top."
           />
 
           <div className="flex flex-col gap-2">
