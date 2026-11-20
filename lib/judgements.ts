@@ -22,7 +22,20 @@ export function pushJudgement(list: JudgementEvent[], j: Judgement, at: number) 
 }
 
 /** How the partner wants judgements drawn: `size` and `opacity` are percentages, `duration` is in ms. */
-export type JudgementStyle = { on: boolean; size: number; opacity: number; duration: number }
+export type JudgementStyle = { on: boolean; kind: JudgementKind; size: number; opacity: number; duration: number }
+
+/** `skin` uses the host skin's sprites, `traditional` draws 100/50/x text, `modern` draws coloured circles. */
+export type JudgementKind = 'skin' | 'traditional' | 'modern'
+
+export const JUDGEMENT_KINDS: { value: JudgementKind; label: string }[] = [
+  { value: 'skin', label: "Host's skin" },
+  { value: 'traditional', label: 'Traditional (100 / 50 / x)' },
+  { value: 'modern', label: 'Modern (coloured circles)' },
+]
+
+function isJudgementKind(value: unknown): value is JudgementKind {
+  return value === 'skin' || value === 'traditional' || value === 'modern'
+}
 
 export const JUDGEMENT_SIZE_MIN = 50
 export const JUDGEMENT_SIZE_MAX = 250
@@ -31,7 +44,13 @@ export const JUDGEMENT_OPACITY_MAX = 100
 export const JUDGEMENT_DURATION_MIN = 200
 export const JUDGEMENT_DURATION_MAX = 2000
 
-export const DEFAULT_JUDGEMENT_STYLE: JudgementStyle = { on: true, size: 100, opacity: 100, duration: 650 }
+export const DEFAULT_JUDGEMENT_STYLE: JudgementStyle = {
+  on: true,
+  kind: 'skin',
+  size: 100,
+  opacity: 100,
+  duration: 650,
+}
 
 const COLORS: Record<Judgement, string> = { 100: '#6ee06e', 50: '#f2c14e', 0: '#ff4d4d' }
 
@@ -77,7 +96,20 @@ export function drawJudgement(
   ctx.save()
   ctx.globalAlpha = Math.max(0, fade) * (style.opacity / 100)
 
-  const sprite = spriteFor(skin, event.j, ruleset)
+  if (style.kind === 'modern') {
+    const r = size * scale * 0.42
+    ctx.beginPath()
+    ctx.arc(x, y + dy, r, 0, Math.PI * 2)
+    ctx.fillStyle = COLORS[event.j]
+    ctx.fill()
+    ctx.lineWidth = Math.max(2, r * 0.22)
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)'
+    ctx.stroke()
+    ctx.restore()
+    return
+  }
+
+  const sprite = style.kind === 'skin' ? spriteFor(skin, event.j, ruleset) : null
   if (sprite) {
     // Skin sprites are drawn at their own size, scaled with the playfield (`size` is 30 osu! pixels).
     const unit = (size / 30) * scale / (sprite.hd ? 2 : 1)
@@ -88,15 +120,14 @@ export function drawJudgement(
     return
   }
 
-  const miss = event.j === 0
-  const px = size * scale * (miss && ruleset !== RULESET_TAIKO && ruleset !== RULESET_MANIA ? 1.6 : 1)
+  const label = style.kind === 'traditional' ? (event.j === 0 ? '\u00d7' : String(event.j)) : labelFor(event.j, ruleset)
+  const px = size * scale * (label === '\u00d7' ? 1.6 : 1)
   ctx.font = `800 ${Math.round(px)}px ui-sans-serif, system-ui, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.lineWidth = Math.max(2, px * 0.14)
   ctx.strokeStyle = 'rgba(0,0,0,0.85)'
-  const label = labelFor(event.j, ruleset)
   ctx.strokeText(label, x, y + dy)
   ctx.fillStyle = COLORS[event.j]
   ctx.fillText(label, x, y + dy)
@@ -155,6 +186,7 @@ export function useJudgementSettings() {
       const saved = JSON.parse(window.localStorage.getItem(STYLE_KEY) ?? '{}') as Partial<JudgementStyle>
       setStyle({
         on,
+        kind: isJudgementKind(saved.kind) ? saved.kind : DEFAULT_JUDGEMENT_STYLE.kind,
         size: clamp(saved.size, JUDGEMENT_SIZE_MIN, JUDGEMENT_SIZE_MAX, DEFAULT_JUDGEMENT_STYLE.size),
         opacity: clamp(saved.opacity, JUDGEMENT_OPACITY_MIN, JUDGEMENT_OPACITY_MAX, DEFAULT_JUDGEMENT_STYLE.opacity),
         duration: clamp(saved.duration, JUDGEMENT_DURATION_MIN, JUDGEMENT_DURATION_MAX, DEFAULT_JUDGEMENT_STYLE.duration),
@@ -169,7 +201,7 @@ export function useJudgementSettings() {
         window.localStorage.setItem(STORAGE_KEY, next.on ? '1' : '0')
         window.localStorage.setItem(
           STYLE_KEY,
-          JSON.stringify({ size: next.size, opacity: next.opacity, duration: next.duration }),
+          JSON.stringify({ kind: next.kind, size: next.size, opacity: next.opacity, duration: next.duration }),
         )
       } catch {}
       return next
